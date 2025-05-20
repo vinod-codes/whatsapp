@@ -717,11 +717,24 @@ async function startWhatsAppBot() {
         }
 
         if (connection === 'close') {
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            const isConflict = lastDisconnect?.error?.output?.payload?.message === 'conflict';
+            
+            console.log('Connection closed due to:', lastDisconnect?.error?.message);
+
+            if (isConflict) {
+                console.log('\n⚠️ CONFLICT DETECTED: Another instance is running or WhatsApp is logged in elsewhere');
+                console.log('Please follow these steps:');
+                console.log('1. Close all other instances of the bot');
+                console.log('2. Log out of WhatsApp Web on other devices');
+                console.log('3. Clear auth files: rm -rf auth_info_baileys/*');
+                console.log('4. Restart the bot: node bot.js\n');
+                process.exit(1); // Exit instead of reconnecting
+            }
+
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
                 ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
                 : true;
-
-            console.log('Connection closed due to:', lastDisconnect?.error?.message);
 
             if (shouldReconnect) {
                 console.log('Reconnecting...');
