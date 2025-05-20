@@ -3,7 +3,7 @@
 A WhatsApp bot for monitoring and managing leads in Bajaj Finance groups.
 
 ## Repository
-https://github.com/vinod-codes/whatsapp-messenger.git
+https://github.com/vinod-codes/whatsapp-bot.git
 
 ## Features
 - Monitors all Bajaj Finance groups automatically
@@ -42,8 +42,8 @@ termux-setup-storage
 4. **Clone the repository:**
 ```bash
 cd storage/downloads
-git clone https://github.com/vinod-codes/whatsapp-messenger.git
-cd whatsapp-messenger
+git clone https://github.com/vinod-codes/whatsapp-bot.git
+cd whatsapp-bot
 ```
 
 5. **Install dependencies:**
@@ -95,7 +95,7 @@ node bot.js
 
 ## Project Structure
 ```
-whatsapp-messenger/
+whatsapp-bot/
 ├── bot.js              # Main bot code
 ├── requirements.txt    # Dependencies
 ├── start-bot.bat      # Windows start script
