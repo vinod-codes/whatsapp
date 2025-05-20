@@ -301,6 +301,134 @@ const vibrateOnNewLeads = true;
 // Vibration duration in milliseconds
 const vibrationDuration = 1000;
 
+// Notification methods for lead detection
+const notificationMethods = {
+    // Sound notification using node-notifier
+    sound: async (leadDetails) => {
+        try {
+            const notifier = require('node-notifier');
+            const path = require('path');
+            
+            // Play sound notification
+            notifier.notify({
+                title: '🔔 New Lead Detected!',
+                message: leadDetails.isUrgent ? '⚠️ Urgent Lead!' : 'New Lead Available',
+                sound: true,
+                wait: true
+            });
+            
+            console.log('🔊 Sound notification played');
+        } catch (error) {
+            console.error('Error playing sound notification:', error);
+        }
+    },
+
+    // Desktop notification
+    desktop: async (leadDetails) => {
+        try {
+            const notifier = require('node-notifier');
+            
+            notifier.notify({
+                title: '🔔 New Lead Detected!',
+                message: leadDetails.isUrgent ? '⚠️ Urgent Lead!' : 'New Lead Available',
+                icon: path.join(__dirname, 'icon.png'), // You can add an icon file
+                sound: true,
+                wait: true
+            });
+            
+            console.log('📱 Desktop notification sent');
+        } catch (error) {
+            console.error('Error sending desktop notification:', error);
+        }
+    },
+
+    // Telegram notification (if you have a Telegram bot)
+    telegram: async (leadDetails) => {
+        try {
+            const TelegramBot = require('node-telegram-bot-api');
+            
+            // Replace with your Telegram bot token and chat ID
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            const chatId = process.env.TELEGRAM_CHAT_ID;
+            
+            if (token && chatId) {
+                const bot = new TelegramBot(token, { polling: false });
+                
+                const message = `🔔 *New Lead Detected!*\n\n` +
+                              `📊 *Lead Details:*\n` +
+                              `• Customer Info: ${leadDetails.hasCustomerInfo ? '✅' : '❌'}\n` +
+                              `• Loan Info: ${leadDetails.hasLoanInfo ? '✅' : '❌'}\n` +
+                              `• Location Info: ${leadDetails.hasLocationInfo ? '✅' : '❌'}\n` +
+                              `• Urgent: ${leadDetails.isUrgent ? '⚠️ YES' : 'No'}\n\n` +
+                              `_Check the leads log for more details._`;
+                
+                await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+                console.log('📱 Telegram notification sent');
+            }
+        } catch (error) {
+            console.error('Error sending Telegram notification:', error);
+        }
+    }
+};
+
+// Function to send notifications for new leads
+async function sendLeadNotifications(leadDetails) {
+    // Try all available notification methods
+    await Promise.all([
+        notificationMethods.sound(leadDetails),
+        notificationMethods.desktop(leadDetails),
+        notificationMethods.telegram(leadDetails)
+    ]);
+}
+
+// Function to play sound notification on Android
+async function playSoundNotification(leadDetails) {
+    try {
+        const { exec } = require('child_process');
+        const platform = process.platform;
+
+        if (platform === 'android') {
+            console.log('🔊 Playing sound notification...');
+            
+            // Use Termux's built-in audio player
+            // We'll use a simple beep sound that's built into Termux
+            const command = 'termux-media-player play /system/media/audio/notifications/Beep_01.ogg';
+            
+            await new Promise((resolve, reject) => {
+                exec(command, (error) => {
+                    if (error) {
+                        console.error('Sound notification error:', error);
+                        reject(error);
+                    } else {
+                        console.log('🔊 Sound notification played successfully');
+                        resolve();
+                    }
+                });
+            });
+        } else {
+            console.log(`[Sound notification skipped - only works on Android]`);
+        }
+    } catch (error) {
+        console.error('Error in playSoundNotification:', error);
+    }
+}
+
+// Replace the old vibrateForLead function with the new notification system
+async function notifyNewLead(leadDetails) {
+    try {
+        // First try vibration if on Android
+        if (process.platform === 'android' && vibrateOnNewLeads) {
+            await vibrateForLead(leadDetails);
+        }
+        
+        // Then play sound notification
+        await playSoundNotification(leadDetails);
+        
+    } catch (error) {
+        console.error('Error in notifyNewLead:', error);
+    }
+}
+
 // Function to vibrate phone for lead notification
 async function vibrateForLead(leadDetails) {
     try {
@@ -377,6 +505,33 @@ const testGroups = [
     'Bajaj+ Lakme Rajajinagar',
     'Bajaj+ Baby sience'
 ];
+
+// Function to log leads to a file
+function logLead(source, message, leadDetails) {
+    try {
+        const now = new Date();
+        const timestamp = now.toLocaleString();
+        const logEntry = `\n========================================\n` +
+                        `📅 Date: ${timestamp}\n` +
+                        `📱 Source: ${source}\n` +
+                        `💬 Message: ${message}\n` +
+                        `📊 Lead Details: ${JSON.stringify(leadDetails, null, 2)}\n` +
+                        `========================================\n`;
+
+        // Create logs directory if it doesn't exist
+        const logsDir = './logs';
+        if (!fs.existsSync(logsDir)) {
+            fs.mkdirSync(logsDir, { recursive: true });
+        }
+
+        // Append to leads log file
+        const logFile = path.join(logsDir, 'leads_log.txt');
+        fs.appendFileSync(logFile, logEntry, 'utf8');
+        console.log('✅ Lead logged successfully');
+    } catch (error) {
+        console.error('Error logging lead:', error);
+    }
+}
 
 // === Main Control Menu ===
 function startTestMenu(sock) {
@@ -714,7 +869,7 @@ async function startWhatsAppBot() {
                                 logLead(`Group: "${groupName}"`, messageContent, leadResult.leadDetails);
 
                                 // Vibrate with appropriate pattern
-                                await vibrateForLead(leadResult.leadDetails);
+                                await notifyNewLead(leadResult.leadDetails);
 
                                 // Send alert to admin with enhanced details
                                 await sendLeadAlert(sock, `Group: ${groupName}`, messageContent, leadResult.leadDetails);
@@ -899,7 +1054,7 @@ async function startWhatsAppBot() {
                         logLead(`Contact: "${message.key.remoteJid}"`, messageContent, leadResult.leadDetails);
 
                         // Vibrate with appropriate pattern
-                        await vibrateForLead(leadResult.leadDetails);
+                        await notifyNewLead(leadResult.leadDetails);
 
                         // Send alert to admin with enhanced details
                         await sendLeadAlert(sock, `Direct Message: ${message.key.remoteJid}`, messageContent, leadResult.leadDetails);
