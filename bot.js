@@ -390,9 +390,12 @@ async function playSoundNotification(leadDetails) {
         if (platform === 'android') {
             console.log('🔊 Playing sound notification...');
             
-            // Use Termux's built-in audio player
-            // We'll use a simple beep sound that's built into Termux
-            const command = 'termux-media-player play /system/media/audio/notifications/Beep_01.ogg';
+            // Use Termux's TTS (Text-to-Speech) to announce the lead
+            const message = leadDetails.isUrgent ? 
+                "Urgent lead detected!" : 
+                "New lead detected!";
+            
+            const command = `termux-tts-speak "${message}"`;
             
             await new Promise((resolve, reject) => {
                 exec(command, (error) => {
