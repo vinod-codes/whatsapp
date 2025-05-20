@@ -1,0 +1,27 @@
+{
+  "name": "whatsapp-agent",
+  "version": "1.0.0",
+  "description": "WhatsApp automation bot that runs on Android using Termux",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "automation",
+    "baileys",
+    "termux"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.5.0",
+    "openai": "^4.0.0",
+    "pino": "^8.15.0",
+    "pino-pretty": "^10.2.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

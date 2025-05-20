@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Authentication
+auth_info_baileys/
+
+# Logs
+*.log
+leads_log.txt
+errors_log.txt
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+*.txt
