@@ -388,28 +388,24 @@ async function playSoundNotification(leadDetails) {
         const platform = process.platform;
 
         if (platform === 'android') {
-            console.log('🔊 Playing sound notification...');
+            console.log('🔊 Playing beep notification...');
             
-            // Use Termux's TTS (Text-to-Speech) to announce the lead
-            const message = leadDetails.isUrgent ? 
-                "Urgent lead detected!" : 
-                "New lead detected!";
-            
-            const command = `termux-tts-speak "${message}"`;
+            // Use Termux's beep command for a simple beep sound
+            const command = 'termux-beep';
             
             await new Promise((resolve, reject) => {
                 exec(command, (error) => {
                     if (error) {
-                        console.error('Sound notification error:', error);
+                        console.error('Beep notification error:', error);
                         reject(error);
                     } else {
-                        console.log('🔊 Sound notification played successfully');
+                        console.log('🔊 Beep notification played successfully');
                         resolve();
                     }
                 });
             });
         } else {
-            console.log(`[Sound notification skipped - only works on Android]`);
+            console.log(`[Beep notification skipped - only works on Android]`);
         }
     } catch (error) {
         console.error('Error in playSoundNotification:', error);
