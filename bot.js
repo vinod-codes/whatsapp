@@ -11,8 +11,9 @@ class MessageQueue {
     constructor() {
         this.queue = [];
         this.processing = false;
-        this.maxRetries = 3;
-        this.retryDelay = 5000; // 5 seconds
+        this.maxRetries = 2; // Reduced retries
+        this.retryDelay = 2000; // Reduced delay to 2 seconds
+        this.batchSize = 5; // Process multiple messages at once
     }
 
     async add(message) {
@@ -31,35 +32,26 @@ class MessageQueue {
         
         this.processing = true;
         while (this.queue.length > 0) {
-            const message = this.queue[0];
-            try {
-                await this.sendMessage(message);
-                this.queue.shift(); // Remove successful message
-            } catch (error) {
-                console.error('Error sending message:', error);
-                if (message.retries < this.maxRetries) {
-                    message.retries++;
-                    await new Promise(resolve => setTimeout(resolve, this.retryDelay));
-                } else {
-                    console.error('Max retries reached, removing message from queue');
-                    this.queue.shift();
-                }
-            }
+            const batch = this.queue.splice(0, this.batchSize);
+            await Promise.all(batch.map(message => this.sendMessage(message)));
         }
         this.processing = false;
     }
 
     async sendMessage(message) {
-        // Implementation will be added when we have the sock instance
-        return new Promise((resolve, reject) => {
+        try {
             if (!message.sock) {
-                reject(new Error('No socket connection available'));
-                return;
+                throw new Error('No socket connection available');
             }
-            message.sock.sendMessage(message.to, { text: message.text })
-                .then(resolve)
-                .catch(reject);
-        });
+            await message.sock.sendMessage(message.to, { text: message.text });
+        } catch (error) {
+            console.error('Error sending message:', error);
+            if (message.retries < this.maxRetries) {
+                message.retries++;
+                await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                this.queue.unshift(message);
+            }
+        }
     }
 }
 
@@ -396,6 +388,443 @@ class LeadManager {
 // Create lead manager instance
 const leadManager = new LeadManager();
 
+// OpenRouter API Configuration
+const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+// Lead Tracking System
+class LeadTracker {
+    constructor() {
+        this.activeLeads = new Map();
+        this.leadHistory = new Map();
+        this.messageContext = new Map();
+        this.leadIdentifiers = new Map();
+        this.leadHandlers = new Map();
+        this.identifierIndex = new Map(); // Add index for faster lookups
+    }
+
+    // Optimize identifier extraction
+    extractIdentifiers(message) {
+        const identifiers = {
+            phone: null,
+            email: null,
+            pan: null,
+            crm: null,
+            opp: null,
+            deal: null
+        };
+
+        // Use single regex for phone numbers
+        const phoneMatch = message.match(/(?:\+91|91)?\s*\d{10}/);
+        if (phoneMatch) identifiers.phone = phoneMatch[0].replace(/\D/g, '');
+
+        // Use single regex for email
+        const emailMatch = message.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+        if (emailMatch) identifiers.email = emailMatch[0];
+
+        // Use single regex for PAN
+        const panMatch = message.match(/[A-Z]{5}[0-9]{4}[A-Z]/);
+        if (panMatch) identifiers.pan = panMatch[0];
+
+        // Use single regex for IDs
+        const idMatch = message.match(/(?:CRM|OPP|DEAL)\s*(?:NO|ID)?:?\s*([A-Z0-9]+)/i);
+        if (idMatch) {
+            const type = message.match(/(CRM|OPP|DEAL)/i)[1].toLowerCase();
+            identifiers[type] = idMatch[1];
+        }
+
+        return identifiers;
+    }
+
+    // Optimize lead lookup
+    getLeadByIdentifier(identifier) {
+        // Check index first
+        for (const [key, value] of Object.entries(identifier)) {
+            if (value && this.identifierIndex.has(value)) {
+                return this.getLeadById(this.identifierIndex.get(value));
+            }
+        }
+        return null;
+    }
+
+    // Update addLead to maintain index
+    addLead(groupId, lead) {
+        if (!this.activeLeads.has(groupId)) {
+            this.activeLeads.set(groupId, new Set());
+        }
+
+        const identifiers = this.extractIdentifiers(lead.message);
+        const leadId = `LEAD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        const enhancedLead = {
+            ...lead,
+            id: leadId,
+            identifiers,
+            status: 'active',
+            lastUpdated: new Date().toISOString()
+        };
+
+        // Update index
+        for (const [key, value] of Object.entries(identifiers)) {
+            if (value) {
+                this.identifierIndex.set(value, leadId);
+            }
+        }
+
+        this.activeLeads.get(groupId).add(enhancedLead);
+        this.leadIdentifiers.set(leadId, identifiers);
+        this.addToHistory(enhancedLead);
+        
+        return enhancedLead;
+    }
+
+    // Add method to check if lead is being handled
+    isLeadBeingHandled(leadId) {
+        return this.leadHandlers.has(leadId);
+    }
+
+    // Add method to set lead handler
+    setLeadHandler(leadId, handler) {
+        this.leadHandlers.set(leadId, {
+            handler,
+            timestamp: Date.now()
+        });
+    }
+
+    // Add method to check if message is about a handled lead
+    isMessageAboutHandledLead(message) {
+        const identifiers = this.extractIdentifiers(message);
+        for (const [leadId, handler] of this.leadHandlers) {
+            const lead = this.getLeadById(leadId);
+            if (lead && this.hasMatchingIdentifiers(identifiers, lead.identifiers)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Enhanced method to check if a message is related to an existing lead
+    isRelatedToExistingLead(groupId, message) {
+        const groupContext = this.messageContext.get(groupId) || [];
+        const lastMessages = groupContext.slice(-5); // Check last 5 messages
+
+        // Extract identifiers from the message
+        const identifiers = this.extractIdentifiers(message);
+        
+        // Check if any identifier matches an existing lead
+        for (const [id, lead] of this.leadIdentifiers) {
+            if (this.hasMatchingIdentifiers(identifiers, lead)) {
+                return true;
+            }
+        }
+
+        // Check message context for related discussions
+        const messageKeywords = this.extractKeywords(message);
+        return lastMessages.some(prevMessage => {
+            const prevKeywords = this.extractKeywords(prevMessage);
+            return this.calculateSimilarity(messageKeywords, prevKeywords) > 0.7;
+        });
+    }
+
+    // Get lead by ID
+    getLeadById(leadId) {
+        for (const [groupId, leads] of this.activeLeads) {
+            for (const lead of leads) {
+                if (lead.id === leadId) {
+                    return lead;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Add message to context
+    addToContext(groupId, message) {
+        if (!this.messageContext.has(groupId)) {
+            this.messageContext.set(groupId, []);
+        }
+        const context = this.messageContext.get(groupId);
+        context.push(message);
+        if (context.length > 10) context.shift(); // Keep last 10 messages
+    }
+
+    // Add to lead history
+    addToHistory(lead) {
+        const key = `${lead.source}-${lead.sender}-${Date.now()}`;
+        this.leadHistory.set(key, {
+            ...lead,
+            timestamp: new Date().toISOString()
+        });
+    }
+
+    // Check if lead is new
+    isNewLead(groupId, lead) {
+        const groupLeads = this.activeLeads.get(groupId) || new Set();
+        return !Array.from(groupLeads).some(existingLead => 
+            this.areLeadsSimilar(existingLead, lead)
+        );
+    }
+
+    // Compare two leads for similarity
+    areLeadsSimilar(lead1, lead2) {
+        const fields = ['phone', 'email', 'amount', 'location'];
+        return fields.some(field => {
+            if (lead1[field] && lead2[field]) {
+                return lead1[field] === lead2[field];
+            }
+            return false;
+        });
+    }
+}
+
+// Create lead tracker instance
+const leadTracker = new LeadTracker();
+
+// Enhanced AI Lead Detection System with OpenRouter
+class AILeadDetector {
+    constructor() {
+        this.confidenceThreshold = 0.7;
+        this.cache = new Map(); // Add cache for recent messages
+        this.cacheTimeout = 60000; // Cache timeout: 1 minute
+    }
+
+    // Add quick pattern check before API call
+    quickPatternCheck(text) {
+        const patterns = [
+            /(?:loan|amount|emi|tenure)/i,
+            /(?:customer|client|patient)/i,
+            /(?:document|kyc|pan|aadhar)/i,
+            /(?:approval|process|check)/i
+        ];
+        return patterns.some(pattern => pattern.test(text));
+    }
+
+    async analyzeText(text) {
+        try {
+            // Quick pattern check first
+            if (!this.quickPatternCheck(text)) {
+                return {
+                    isLead: false,
+                    confidence: 0,
+                    priority: 'Low',
+                    extractedInfo: {},
+                    reasoning: 'No lead patterns found',
+                    isNewLead: false,
+                    relatedToExisting: false
+                };
+            }
+
+            // Check cache first
+            const cacheKey = text.toLowerCase().trim();
+            const cached = this.cache.get(cacheKey);
+            if (cached && (Date.now() - cached.timestamp) < this.cacheTimeout) {
+                return cached.result;
+            }
+
+            // If not in cache, proceed with API call
+            const response = await fetch(OPENROUTER_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                    'HTTP-Referer': 'https://github.com/your-repo',
+                    'X-Title': 'WhatsApp Lead Detector'
+                },
+                body: JSON.stringify({
+                    model: "anthropic/claude-3-opus-20240229",
+                    messages: [
+                        {
+                            role: "system",
+                            content: `You are a lead detection AI specialized in financial services. 
+                            Analyze the following message and determine if it's a potential lead.
+                            Consider:
+                            1. Is this a genuine lead or just casual conversation?
+                            2. Does it contain specific financial service needs?
+                            3. Is there actionable information?
+                            
+                            Respond in JSON format:
+                            {
+                                "isLead": boolean,
+                                "confidence": number (0-1),
+                                "priority": "High/Medium/Low",
+                                "extractedInfo": {
+                                    "contact": {
+                                        "name": string,
+                                        "phone": string,
+                                        "email": string
+                                    },
+                                    "financial": {
+                                        "amount": number,
+                                        "purpose": string,
+                                        "urgency": string
+                                    },
+                                    "location": {
+                                        "city": string,
+                                        "area": string
+                                    }
+                                },
+                                "reasoning": "Brief explanation of why this is/isn't a lead",
+                                "isNewLead": boolean,
+                                "relatedToExisting": boolean
+                            }`
+                        },
+                        {
+                            role: "user",
+                            content: text
+                        }
+                    ],
+                    temperature: 0.3
+                })
+            });
+
+            const data = await response.json();
+            const analysis = JSON.parse(data.choices[0].message.content);
+
+            // Cache the result
+            this.cache.set(cacheKey, {
+                result: analysis,
+                timestamp: Date.now()
+            });
+
+            return analysis;
+        } catch (error) {
+            console.error('Error in AI analysis:', error);
+            return {
+                isLead: false,
+                confidence: 0,
+                priority: 'Low',
+                extractedInfo: {},
+                reasoning: 'Error in AI analysis',
+                isNewLead: false,
+                relatedToExisting: false
+            };
+        }
+    }
+}
+
+// Create AI lead detector instance
+const aiLeadDetector = new AILeadDetector();
+
+// Enhanced Terminal UI
+class TerminalUI {
+    constructor() {
+        this.colors = {
+            reset: '\x1b[0m',
+            bright: '\x1b[1m',
+            dim: '\x1b[2m',
+            underscore: '\x1b[4m',
+            blink: '\x1b[5m',
+            reverse: '\x1b[7m',
+            hidden: '\x1b[8m',
+            
+            fg: {
+                black: '\x1b[30m',
+                red: '\x1b[31m',
+                green: '\x1b[32m',
+                yellow: '\x1b[33m',
+                blue: '\x1b[34m',
+                magenta: '\x1b[35m',
+                cyan: '\x1b[36m',
+                white: '\x1b[37m'
+            },
+            
+            bg: {
+                black: '\x1b[40m',
+                red: '\x1b[41m',
+                green: '\x1b[42m',
+                yellow: '\x1b[43m',
+                blue: '\x1b[44m',
+                magenta: '\x1b[45m',
+                cyan: '\x1b[46m',
+                white: '\x1b[47m'
+            }
+        };
+    }
+
+    clearScreen() {
+        process.stdout.write('\x1Bc');
+    }
+
+    printHeader(text) {
+        const width = process.stdout.columns;
+        const padding = Math.floor((width - text.length) / 2);
+        console.log('\n' + '='.repeat(width));
+        console.log(' '.repeat(padding) + this.colors.bright + text + this.colors.reset);
+        console.log('='.repeat(width) + '\n');
+    }
+
+    printLead(lead) {
+        console.log(this.colors.fg.cyan + '🔔 NEW LEAD DETECTED!' + this.colors.reset);
+        console.log(this.colors.fg.yellow + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' + this.colors.reset);
+        
+        // Priority indicator
+        const priorityColor = {
+            'High': this.colors.fg.red,
+            'Medium': this.colors.fg.yellow,
+            'Low': this.colors.fg.green
+        }[lead.priority];
+        
+        console.log(`${priorityColor}Priority: ${lead.priority}${this.colors.reset}`);
+        console.log(`${this.colors.fg.cyan}Confidence: ${(lead.confidence * 100).toFixed(1)}%${this.colors.reset}`);
+        
+        // Extracted information
+        if (lead.extractedInfo) {
+            console.log('\n' + this.colors.bright + 'Extracted Information:' + this.colors.reset);
+            for (const [key, value] of Object.entries(lead.extractedInfo)) {
+                console.log(`${this.colors.fg.magenta}${key}:${this.colors.reset} ${value}`);
+            }
+        }
+        
+        console.log(this.colors.fg.yellow + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' + this.colors.reset + '\n');
+    }
+
+    printStats(stats) {
+        console.log(this.colors.fg.cyan + '📊 LEAD STATISTICS' + this.colors.reset);
+        console.log(this.colors.fg.yellow + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' + this.colors.reset);
+        
+        console.log(`${this.colors.fg.green}Total Leads: ${stats.total}${this.colors.reset}`);
+        console.log(`${this.colors.fg.blue}Conversion Rate: ${stats.conversionRate.toFixed(1)}%${this.colors.reset}`);
+        
+        console.log('\n' + this.colors.bright + 'By Status:' + this.colors.reset);
+        for (const [status, count] of Object.entries(stats.byStatus)) {
+            console.log(`${this.colors.fg.magenta}${status}:${this.colors.reset} ${count}`);
+        }
+        
+        console.log('\n' + this.colors.bright + 'By Category:' + this.colors.reset);
+        for (const [category, count] of Object.entries(stats.byCategory)) {
+            console.log(`${this.colors.fg.magenta}${category}:${this.colors.reset} ${count}`);
+        }
+        
+        console.log(this.colors.fg.yellow + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' + this.colors.reset + '\n');
+    }
+
+    printMenu(options) {
+        console.log(this.colors.fg.cyan + '📱 MENU OPTIONS' + this.colors.reset);
+        console.log(this.colors.fg.yellow + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' + this.colors.reset);
+        
+        options.forEach((option, index) => {
+            console.log(`${this.colors.fg.green}${index + 1}.${this.colors.reset} ${option}`);
+        });
+        
+        console.log(this.colors.fg.yellow + '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' + this.colors.reset + '\n');
+    }
+
+    printError(error) {
+        console.log(this.colors.fg.red + '❌ ERROR: ' + error + this.colors.reset);
+    }
+
+    printSuccess(message) {
+        console.log(this.colors.fg.green + '✅ ' + message + this.colors.reset);
+    }
+
+    printWarning(message) {
+        console.log(this.colors.fg.yellow + '⚠️ ' + message + this.colors.reset);
+    }
+}
+
+// Create terminal UI instance
+const terminalUI = new TerminalUI();
+
 // Configure logger - set to warn level to reduce verbosity
 const logger = pino({
     level: 'warn',
@@ -479,6 +908,7 @@ const MAX_GREETINGS_PER_DAY_IN_GROUP = 2;
 
 // Updated: Full list of groups to monitor
 const groupsToMonitor = [
+    'Bajaj Finance+Smiles.ai',  // Added new group
     'Bajaj + Isha',
     'Bajaj+ Lakme Rajajinagar',
     'Bajaj+ Baby sience',
@@ -499,6 +929,13 @@ const groupsToMonitor = [
     'Bajaj + Dr Agarwal rajaji nagar',
     'Bajaj -LC Group Bangalore',
 ];
+
+// Add special group rules
+const specialGroupRules = {
+    'Bajaj Finance+Smiles.ai': {
+        skipLocations: ['hyderabad', 'hyd', 'hitech city', 'gachibowli', 'secunderabad']
+    }
+};
 
 // Enhanced professional greetings with more options
 const professionalGreetings = {
@@ -532,18 +969,30 @@ const professionalGreetings = {
 // Enhanced lead detection patterns
 const leadPatterns = {
     customerInfo: {
-        name: /(?:name|pt name|customer name)[\s:]+([^\n]+)/i,
-        phone: /(?:ph\.?\s*no|mobile|number|contact)[\s:]+(\d{10,})/i,
-        email: /(?:email|gmail|mail)[\s:]+([^\s@]+@[^\s@]+\.[^\s@]+)/i
+        name: /(?:name|patient|cx|customer)[\s:]+([a-zA-Z\s]+)/i,
+        phone: /(?:phone|mobile|number|contact)[\s:]*(\d{10})/i,
+        email: /[\w\.-]+@[\w\.-]+\.\w+/i,
+        pan: /(?:pan|pancard)[\s:]*([a-zA-Z0-9]{10})/i
     },
     loanInfo: {
-        amount: /(?:loan|amount|rs\.?|total)[\s:]+(?:of|is)?\s*(\d+(?:,\d+)*(?:\.\d+)?)/i,
-        tenure: /(?:tenure|duration)[\s:]+(\d+)\s*(?:months|years?)/i,
-        emi: /(?:emi|monthly)[\s:]+(?:of|is)?\s*(\d+(?:,\d+)*(?:\.\d+)?)/i
+        amount: /(?:amount|loan|limit)[\s:]*(\d+(?:\.\d{2})?)[k]?/i,
+        tenure: /(?:tenure|scheme)[\s:]*(\d+)\/(\d+)/i,
+        emi: /(?:emi|monthly)[\s:]*(\d+(?:\.\d{2})?)/i,
+        topup: /(?:top\s*up|additional|more)[\s:]*(\d+(?:\.\d{2})?)[k]?/i
     },
     location: {
-        branch: /(?:branch|location|area)[\s:]+([^\n]+)/i,
-        city: /(?:city|town)[\s:]+([^\n]+)/i
+        branch: /(?:branch|area)[\s:]*([a-zA-Z\s]+)/i,
+        city: /(?:city|location)[\s:]*([a-zA-Z\s]+)/i
+    },
+    urgency: {
+        immediate: /(?:asap|urgent|immediate|now|today|waiting)/i,
+        followup: /(?:follow\s*up|update|status|progress)/i
+    },
+    status: {
+        existing: /(?:existing|current|old)[\s:]*customer/i,
+        new: /(?:new|fresh)[\s:]*customer/i,
+        approved: /(?:approved|eligible|available)/i,
+        rejected: /(?:rejected|not\s*approved|not\s*eligible)/i
     }
 };
 
@@ -640,22 +1089,35 @@ function isLeadMessage(message) {
     
     const msg = message.toLowerCase();
     let isLead = false;
-    let leadDetails = {};
+    let leadDetails = {
+        hasCustomerInfo: false,
+        hasLoanInfo: false,
+        hasLocationInfo: false,
+        isUrgent: false,
+        isExistingCustomer: false,
+        isNewCustomer: false,
+        status: null,
+        confidence: 0
+    };
     
     // Check for customer information
     if (leadPatterns.customerInfo.name.test(msg) || 
         leadPatterns.customerInfo.phone.test(msg) || 
-        leadPatterns.customerInfo.email.test(msg)) {
+        leadPatterns.customerInfo.email.test(msg) ||
+        leadPatterns.customerInfo.pan.test(msg)) {
         isLead = true;
         leadDetails.hasCustomerInfo = true;
+        leadDetails.confidence += 0.3;
     }
     
     // Check for loan information
     if (leadPatterns.loanInfo.amount.test(msg) || 
         leadPatterns.loanInfo.tenure.test(msg) || 
-        leadPatterns.loanInfo.emi.test(msg)) {
+        leadPatterns.loanInfo.emi.test(msg) ||
+        leadPatterns.loanInfo.topup.test(msg)) {
         isLead = true;
         leadDetails.hasLoanInfo = true;
+        leadDetails.confidence += 0.3;
     }
     
     // Check for location information
@@ -663,13 +1125,38 @@ function isLeadMessage(message) {
         leadPatterns.location.city.test(msg)) {
         isLead = true;
         leadDetails.hasLocationInfo = true;
+        leadDetails.confidence += 0.2;
     }
     
     // Check for urgency indicators
-    const urgentKeywords = ['asap', 'urgent', 'immediate', 'now', 'today'];
-    if (urgentKeywords.some(keyword => msg.includes(keyword))) {
+    if (leadPatterns.urgency.immediate.test(msg)) {
         leadDetails.isUrgent = true;
+        leadDetails.confidence += 0.1;
     }
+    
+    // Check for customer status
+    if (leadPatterns.status.existing.test(msg)) {
+        leadDetails.isExistingCustomer = true;
+        leadDetails.confidence += 0.1;
+    } else if (leadPatterns.status.new.test(msg)) {
+        leadDetails.isNewCustomer = true;
+        leadDetails.confidence += 0.1;
+    }
+    
+    // Check for approval status
+    if (leadPatterns.status.approved.test(msg)) {
+        leadDetails.status = 'approved';
+    } else if (leadPatterns.status.rejected.test(msg)) {
+        leadDetails.status = 'rejected';
+    }
+    
+    // Check for follow-up indicators
+    if (leadPatterns.urgency.followup.test(msg)) {
+        leadDetails.requiresFollowup = true;
+    }
+    
+    // Only consider it a lead if confidence is above threshold
+    isLead = isLead && leadDetails.confidence >= 0.3;
     
     return { isLead, leadDetails };
 }
@@ -690,25 +1177,24 @@ const vibrateOnNewLeads = true;
 // Vibration duration in milliseconds
 const vibrationDuration = 1000;
 
-// Notification methods for lead detection
+// Update notification methods to be more professional
 const notificationMethods = {
     // Sound notification using node-notifier
     sound: async (leadDetails) => {
         try {
             const notifier = require('node-notifier');
-            const path = require('path');
             
             // Play sound notification
             notifier.notify({
-                title: '🔔 New Lead Detected!',
-                message: leadDetails.isUrgent ? '⚠️ Urgent Lead!' : 'New Lead Available',
+                title: '🔔 New Lead',
+                message: 'New lead detected in group',
                 sound: true,
                 wait: true
             });
             
-            console.log('🔊 Sound notification played');
+            console.log('🔊 Lead notification played');
         } catch (error) {
-            console.error('Error playing sound notification:', error);
+            console.error('Error playing notification:', error);
         }
     },
 
@@ -718,44 +1204,16 @@ const notificationMethods = {
             const notifier = require('node-notifier');
             
             notifier.notify({
-                title: '🔔 New Lead Detected!',
-                message: leadDetails.isUrgent ? '⚠️ Urgent Lead!' : 'New Lead Available',
-                icon: path.join(__dirname, 'icon.png'), // You can add an icon file
+                title: '🔔 New Lead',
+                message: 'New lead detected in group',
+                icon: path.join(__dirname, 'icon.png'),
                 sound: true,
                 wait: true
             });
             
-            console.log('📱 Desktop notification sent');
+            console.log('📱 Lead notification sent');
         } catch (error) {
-            console.error('Error sending desktop notification:', error);
-        }
-    },
-
-    // Telegram notification (if you have a Telegram bot)
-    telegram: async (leadDetails) => {
-        try {
-            const TelegramBot = require('node-telegram-bot-api');
-            
-            // Replace with your Telegram bot token and chat ID
-            const token = process.env.TELEGRAM_BOT_TOKEN;
-            const chatId = process.env.TELEGRAM_CHAT_ID;
-            
-            if (token && chatId) {
-                const bot = new TelegramBot(token, { polling: false });
-                
-                const message = `🔔 *New Lead Detected!*\n\n` +
-                              `📊 *Lead Details:*\n` +
-                              `• Customer Info: ${leadDetails.hasCustomerInfo ? '✅' : '❌'}\n` +
-                              `• Loan Info: ${leadDetails.hasLoanInfo ? '✅' : '❌'}\n` +
-                              `• Location Info: ${leadDetails.hasLocationInfo ? '✅' : '❌'}\n` +
-                              `• Urgent: ${leadDetails.isUrgent ? '⚠️ YES' : 'No'}\n\n` +
-                              `_Check the leads log for more details._`;
-                
-                await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-                console.log('📱 Telegram notification sent');
-            }
-        } catch (error) {
-            console.error('Error sending Telegram notification:', error);
+            console.error('Error sending notification:', error);
         }
     }
 };
@@ -765,8 +1223,7 @@ async function sendLeadNotifications(leadDetails) {
     // Try all available notification methods
     await Promise.all([
         notificationMethods.sound(leadDetails),
-        notificationMethods.desktop(leadDetails),
-        notificationMethods.telegram(leadDetails)
+        notificationMethods.desktop(leadDetails)
     ]);
 }
 
@@ -1200,9 +1657,8 @@ async function startWhatsAppBot() {
 
     // Handle incoming messages
     sock.ev.on('messages.upsert', async ({ messages }) => {
-        // Use a lock to prevent concurrent processing
         if (isProcessingMessage) {
-            console.log("⏳ Already processing a message, skipping...");
+            terminalUI.printWarning("Already processing a message, skipping...");
             return;
         }
 
@@ -1210,26 +1666,14 @@ async function startWhatsAppBot() {
 
         try {
             for (const message of messages) {
-                // Skip if message has been processed already (prevent duplicates)
+                // Skip if message has been processed already
                 const messageId = message.key.id;
                 if (processedMessages.has(messageId)) {
-                    console.log(`⏭️ Skipping already processed message: ${messageId}`);
                     continue;
                 }
 
-                // Mark message as processed with current timestamp
-                const now = Date.now();
-                processedMessages.set(messageId, now);
-                console.log(`✅ Processing message: ${messageId}`);
-
-                // Clean up old messages (older than 24 hours) to prevent memory leaks
-                const ONE_DAY_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-                for (const [id, timestamp] of processedMessages.entries()) {
-                    if (now - timestamp > ONE_DAY_MS) {
-                        processedMessages.delete(id);
-                        console.log(`🧹 Removed old message from history: ${id}`);
-                    }
-                }
+                // Mark message as processed
+                processedMessages.set(messageId, Date.now());
 
                 // Skip messages sent by the bot itself
                 if (message.key.fromMe) continue;
@@ -1246,229 +1690,191 @@ async function startWhatsAppBot() {
                 // Check if message is from a group
                 const isGroup = message.key.remoteJid.endsWith('@g.us');
 
-                // For group messages, check if it's from a monitored group
                 if (isGroup) {
                     try {
                         // Get group metadata
                         const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
                         const groupName = groupMetadata.subject;
 
+                        // Strictly check if this is a monitored group
+                        const isMonitoredGroup = groupsToMonitor.includes(groupName);
+                        
+                        // Skip if not a monitored group - no logging or processing
+                        if (!isMonitoredGroup) {
+                            continue;
+                        }
+
                         // Skip if monitoring is disabled
                         if (!global.botState.isMonitoring) {
-                            console.log('⏸️ Lead monitoring is currently disabled');
-                            return;
+                            continue;
                         }
 
-                        // Get sender info if available
+                        // Get sender info
                         let senderName = "Unknown";
                         if (message.key.participant) {
-                            try {
-                                const [senderNumber] = message.key.participant.split('@');
-                                senderName = senderNumber;
-                            } catch (e) {
-                                // Just use the default if there's an error
-                            }
+                            const [senderNumber] = message.key.participant.split('@');
+                            senderName = senderNumber;
                         }
 
-                        // Always log all messages from all groups for visibility
-                        const timestamp = new Date().toLocaleTimeString();
-                        console.log(`\n[${timestamp}] 📱 GROUP MESSAGE:`);
-                        console.log(`📝 Group: ${groupName}`);
-                        console.log(`👤 Sender: ${senderName}`);
-                        console.log(`💬 Message: ${messageContent}`);
-                        console.log(`------------------------------------------`);
+                        // Add message to context
+                        leadTracker.addToContext(message.key.remoteJid, messageContent);
 
-                        // We no longer need to check for test contacts
-                        // All leads will get responses based on time rules
+                        // Check if message is related to existing lead
+                        if (leadTracker.isRelatedToExistingLead(message.key.remoteJid, messageContent)) {
+                            terminalUI.printWarning(`Message appears to be related to an existing lead - skipping response`);
+                            continue;
+                        }
 
-                        // Check if this is a monitored group
-                        const isMonitoredGroup = groupsToMonitor.includes(groupName) ||
-                                                groupsToMonitor.some(name => groupName.includes(name));
+                        // Use AI to analyze the message
+                        const leadAnalysis = await aiLeadDetector.analyzeText(messageContent);
 
-                        if (isMonitoredGroup) {
-                            console.log(`✅ This is a monitored group!`);
+                        // Only proceed if it's a new lead
+                        if (leadAnalysis.isLead && leadAnalysis.isNewLead) {
+                            terminalUI.printLead(leadAnalysis);
 
-                            // Check if message appears to be a lead
-                            const leadResult = isLeadMessage(messageContent);
+                            // Create lead in the lead management system
+                            const lead = await leadManager.createLead({
+                                ...leadAnalysis.extractedInfo,
+                                source: `Group: ${groupName}`,
+                                sender: senderName,
+                                message: messageContent,
+                                priority: leadAnalysis.priority
+                            });
 
-                            // Only proceed if it's a lead message
-                            if (leadResult.isLead) {
-                                console.log(`🔔 LEAD DETECTED in message!`);
-                                console.log(`📊 Lead Details:`, leadResult.leadDetails);
+                            // Add to lead tracker
+                            leadTracker.addLead(message.key.remoteJid, lead);
 
-                                // Update lead statistics
-                                global.botState.updateLeadStats(leadResult.leadDetails.isUrgent);
+                            // Update lead statistics
+                            global.botState.updateLeadStats(leadAnalysis.priority === 'High');
 
-                                // Log the message with enhanced details
-                                logLead(`Group: "${groupName}"`, messageContent, leadResult.leadDetails);
+                            // Log the lead
+                            logLead(`Group: "${groupName}"`, messageContent, leadAnalysis);
 
-                                // Vibrate with appropriate pattern
-                                await notifyNewLead(leadResult.leadDetails);
+                            // Send notifications
+                            await notifyNewLead(leadAnalysis);
+                            await sendLeadAlert(sock, `Group: ${groupName}`, messageContent, leadAnalysis);
 
-                                // Send alert to admin with enhanced details
-                                await sendLeadAlert(sock, `Group: ${groupName}`, messageContent, leadResult.leadDetails);
+                            // Send "Checking" message
+                            await messageQueue.add({
+                                sock,
+                                to: message.key.remoteJid,
+                                text: "Checking team"
+                            });
 
-                                // Send a "Checking" message for all leads
-                                {
-                                    // Check if we've already responded to this specific message
-                                    if (respondedToMessages.has(message.key.id)) {
-                                        console.log(`⏱️ Skipping response - already responded to this message ID: ${message.key.id}`);
-                                        return;
-                                    }
-
-                                    // Clean up old responded messages (older than 24 hours)
-                                    const ONE_DAY_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-                                    const currentTime = Date.now();
-                                    for (const [id, timestamp] of respondedToMessages.entries()) {
-                                        if (currentTime - timestamp > ONE_DAY_MS) {
-                                            respondedToMessages.delete(id);
-                                            console.log(`🧹 Removed old response record: ${id}`);
-                                        }
-                                    }
-
-                                    const now = new Date().getTime();
-                                    const lastResponse = lastTestResponseSent.get(message.key.remoteJid) || 0;
-                                    const minutesSinceLastResponse = (now - lastResponse) / (1000 * 60);
-
-                                    // Only send a response if it's been at least 60 minutes (1 hour) since the last one
-                                    // or if this is the first lead from this contact in this group
-                                    if (minutesSinceLastResponse >= 60 || lastResponse === 0) {
-                                        // Check if we're already sending a response
-                                        if (isSendingResponse) {
-                                            console.log(`⏳ Already sending a response, skipping...`);
-                                            return;
-                                        }
-
-                                        try {
-                                            isSendingResponse = true;
-                                            const testResponse = "Checking team";
-                                            await sock.sendMessage(message.key.remoteJid, { text: testResponse });
-                                            console.log(`✉️ Test response sent: "${testResponse}"`);
-
-                                            // Update the last response time
-                                            lastTestResponseSent.set(message.key.remoteJid, now);
-                                            saveStateToFile(lastTestResponseSent, LAST_RESPONSE_FILE);
-
-                                            // Mark this message as responded to with timestamp
-                                            respondedToMessages.set(message.key.id, Date.now());
-                                        } finally {
-                                            isSendingResponse = false;
-                                        }
-                                    } else {
-                                        console.log(`⏱️ Skipping response - last response was ${minutesSinceLastResponse.toFixed(1)} minutes ago`);
-                                    }
-                                }
-                            } else {
-                                console.log(`❌ No lead keywords detected in this message`);
-                            }
-                        } else {
-                            console.log(`❌ Not a monitored group`);
+                            // Show updated statistics
+                            const stats = await leadManager.getLeadStats();
+                            terminalUI.printStats(stats);
                         }
                     } catch (error) {
-                        console.error('Error processing group message:', error);
+                        terminalUI.printError(`Error processing group message: ${error.message}`);
                     }
                 } else {
-                    // Handle direct messages
-                    // Get sender info
-                    const [senderNumber] = message.key.remoteJid.split('@');
-
-                    // Skip if monitoring is disabled
-                    if (!global.botState.isMonitoring) {
-                        console.log('⏸️ Lead monitoring is currently disabled');
-                        return;
-                    }
-
-                    // Always log all direct messages for visibility
-                    const timestamp = new Date().toLocaleTimeString();
-                    console.log(`\n[${timestamp}] 📱 DIRECT MESSAGE:`);
-                    console.log(`👤 Sender: ${senderNumber}`);
-                    console.log(`💬 Message: ${messageContent}`);
-                    console.log(`------------------------------------------`);
-
-                    // We no longer need to check for test contacts
-                    // All leads will get responses based on time rules
-
-                    // Check if it's a lead message
-                    const leadResult = isLeadMessage(messageContent);
-
-                    // Only proceed if it's a lead message
-                    if (leadResult.isLead) {
-                        console.log(`🔔 LEAD DETECTED in direct message!`);
-                        console.log(`📊 Lead Details:`, leadResult.leadDetails);
-
-                        // Log the message with enhanced details
-                        logLead(`Contact: "${message.key.remoteJid}"`, messageContent, leadResult.leadDetails);
-
-                        // Vibrate with appropriate pattern
-                        await notifyNewLead(leadResult.leadDetails);
-
-                        // Send alert to admin with enhanced details
-                        await sendLeadAlert(sock, `Direct Message: ${message.key.remoteJid}`, messageContent, leadResult.leadDetails);
-
-                        // Send a "Checking" message for all leads
-                        {
-                            // Check if we've already responded to this specific message
-                            if (respondedToMessages.has(message.key.id)) {
-                                console.log(`⏱️ Skipping response - already responded to this message ID: ${message.key.id}`);
-                                return;
-                            }
-
-                            // Clean up old responded messages (older than 24 hours)
-                            const ONE_DAY_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-                            const currentTime = Date.now();
-                            for (const [id, timestamp] of respondedToMessages.entries()) {
-                                if (currentTime - timestamp > ONE_DAY_MS) {
-                                    respondedToMessages.delete(id);
-                                    console.log(`🧹 Removed old response record: ${id}`);
-                                }
-                            }
-
-                            const now = new Date().getTime();
-                            const lastResponse = lastTestResponseSent.get(message.key.remoteJid) || 0;
-                            const minutesSinceLastResponse = (now - lastResponse) / (1000 * 60);
-
-                            // Only send a response if it's been at least 60 minutes (1 hour) since the last one
-                            // or if this is the first lead from this contact
-                            if (minutesSinceLastResponse >= 60 || lastResponse === 0) {
-                                // Check if we're already sending a response
-                                if (isSendingResponse) {
-                                    console.log(`⏳ Already sending a response, skipping...`);
-                                    return;
-                                }
-
-                                try {
-                                    isSendingResponse = true;
-                                    const testResponse = "Checking team";
-                                    await sock.sendMessage(message.key.remoteJid, { text: testResponse });
-                                    console.log(`✉️ Test response sent: "${testResponse}"`);
-
-                                    // Update the last response time
-                                    lastTestResponseSent.set(message.key.remoteJid, now);
-                                    saveStateToFile(lastTestResponseSent, LAST_RESPONSE_FILE);
-
-                                    // Mark this message as responded to with timestamp
-                                    respondedToMessages.set(message.key.id, Date.now());
-                                } finally {
-                                    isSendingResponse = false;
-                                }
-                            } else {
-                                console.log(`⏱️ Skipping response - last response was ${minutesSinceLastResponse.toFixed(1)} minutes ago`);
-                            }
-                        }
-                    } else {
-                        console.log(`❌ No lead keywords detected in this direct message`);
-                    }
+                    // Skip all direct messages - no processing or logging
+                    continue;
                 }
             }
         } catch (error) {
-            console.error('Error processing messages:', error);
+            terminalUI.printError(`Error processing messages: ${error.message}`);
         } finally {
-            // Release the lock
             isProcessingMessage = false;
         }
     });
 
     return sock;
+}
+
+// Update handleLeadResponse function to only respond once with "Checking team"
+async function handleLeadResponse(sock, message) {
+    const messageContent = message.message?.conversation ||
+                          message.message?.extendedTextMessage?.text ||
+                          message.message?.imageMessage?.caption ||
+                          '';
+
+    if (!messageContent) return;
+
+    // Get group metadata if it's a group message
+    let groupName = '';
+    if (message.key.remoteJid.endsWith('@g.us')) {
+        try {
+            const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
+            groupName = groupMetadata.subject;
+        } catch (error) {
+            console.error('Error getting group metadata:', error);
+        }
+    }
+
+    // Check for special group rules
+    if (groupName && specialGroupRules[groupName]) {
+        const rules = specialGroupRules[groupName];
+        const messageLower = messageContent.toLowerCase();
+        
+        // Check if message contains any of the skip locations
+        if (rules.skipLocations.some(location => messageLower.includes(location.toLowerCase()))) {
+            console.log(`Skipping response for ${groupName} - Location is in skip list`);
+            return;
+        }
+    }
+
+    // Extract identifiers from message
+    const identifiers = leadTracker.extractIdentifiers(messageContent);
+    
+    // Check if message is about a lead being handled by someone else
+    if (leadTracker.isMessageAboutHandledLead(messageContent)) {
+        console.log('Message is about a lead being handled by someone else - skipping response');
+        return;
+    }
+    
+    // Check if this is a follow-up to an existing lead
+    const existingLead = leadTracker.getLeadByIdentifier(identifiers);
+    
+    if (existingLead) {
+        // Skip if lead is already being handled by someone else
+        if (leadTracker.isLeadBeingHandled(existingLead.id)) {
+            console.log('Lead is already being handled - skipping response');
+            return;
+        }
+
+        // Update lead status based on message content
+        if (messageContent.toLowerCase().includes('approved')) {
+            leadTracker.updateLeadStatus(existingLead.id, 'approved');
+        } else if (messageContent.toLowerCase().includes('rejected')) {
+            leadTracker.updateLeadStatus(existingLead.id, 'rejected');
+        } else {
+            leadTracker.updateLeadStatus(existingLead.id, 'in_progress', {
+                lastMessage: messageContent
+            });
+        }
+        
+        // Set the current handler for this lead
+        leadTracker.setLeadHandler(existingLead.id, message.key.remoteJid);
+        
+        // No response for existing leads
+        return;
+    } else {
+        // New lead - process as before
+        const leadAnalysis = await aiLeadDetector.analyzeText(messageContent);
+        if (leadAnalysis.isLead) {
+            const lead = await leadManager.createLead({
+                ...leadAnalysis.extractedInfo,
+                source: message.key.remoteJid,
+                message: messageContent
+            });
+            
+            const newLead = leadTracker.addLead(message.key.remoteJid, lead);
+            // Set the current handler for this new lead
+            leadTracker.setLeadHandler(newLead.id, message.key.remoteJid);
+            
+            // Only send "Checking team" for new leads
+            await messageQueue.add({
+                sock,
+                to: message.key.remoteJid,
+                text: "Checking team"
+            });
+
+            // Send notifications for new leads only
+            await notifyNewLead(leadAnalysis);
+        }
+    }
 }
 
 // Start the bot
