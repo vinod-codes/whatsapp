@@ -6,6 +6,70 @@ const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode-terminal');
 
+// Add cooldown constants and functions
+const GROUP_COOLDOWN = 30 * 60 * 1000; // 30 minutes in milliseconds
+const COOLDOWN_FILE = './state/group_cooldowns.json';
+
+// Function to load cooldown timers
+function loadGroupCooldowns() {
+    try {
+        if (fs.existsSync(COOLDOWN_FILE)) {
+            const data = fs.readFileSync(COOLDOWN_FILE, 'utf8');
+            const cooldowns = JSON.parse(data);
+            console.log('\n========================================');
+            console.log('📥 LOADED COOLDOWN TIMERS');
+            console.log('========================================');
+            for (const [group, time] of Object.entries(cooldowns)) {
+                const remainingTime = Math.ceil((GROUP_COOLDOWN - (Date.now() - Number(time))) / 60000);
+                if (remainingTime > 0) {
+                    console.log(`Group: ${group}`);
+                    console.log(`Last message: ${new Date(Number(time)).toLocaleString()}`);
+                    console.log(`Time remaining: ${remainingTime} minutes`);
+                    console.log('----------------------------------------');
+                }
+            }
+            console.log('========================================\n');
+            return new Map(Object.entries(cooldowns).map(([key, value]) => [key, Number(value)]));
+        }
+    } catch (error) {
+        console.error('Error loading cooldown timers:', error);
+    }
+    return new Map();
+}
+
+// Function to save cooldown timers
+function saveGroupCooldowns(cooldowns) {
+    try {
+        // Create state directory if it doesn't exist
+        const stateDir = path.dirname(COOLDOWN_FILE);
+        if (!fs.existsSync(stateDir)) {
+            fs.mkdirSync(stateDir, { recursive: true });
+        }
+        
+        // Convert Map to object and save
+        const data = Object.fromEntries(cooldowns);
+        fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(data, null, 2), 'utf8');
+        
+        console.log('\n========================================');
+        console.log('📝 SAVED COOLDOWN TIMERS');
+        console.log('========================================');
+        for (const [group, time] of Object.entries(data)) {
+            console.log(`Group: ${group}`);
+            console.log(`Cooldown until: ${new Date(Number(time) + GROUP_COOLDOWN).toLocaleString()}`);
+            console.log('----------------------------------------');
+        }
+        console.log('========================================\n');
+    } catch (error) {
+        console.error('Error saving cooldown timers:', error);
+    }
+}
+
+// Initialize groupLastMessageTime with saved data
+const groupLastMessageTime = loadGroupCooldowns();
+
+// Add sister's cooldown tracking
+const sisterLastMessageTime = new Map();
+
 // Message Queue System
 class MessageQueue {
     constructor() {
@@ -1401,85 +1465,54 @@ async function sendLeadNotifications(leadDetails) {
 // Function to play sound notification on Android
 async function playSoundNotification(leadDetails) {
     try {
+        console.log('\n========================================');
+        console.log('🔊 PLAYING NOTIFICATION BEEP');
+        console.log('========================================');
+        
+        // Try multiple methods to play beep
         const { exec } = require('child_process');
-        const platform = process.platform;
-
-        if (platform === 'android') {
-            console.log('🔊 Playing notification sound...');
-            
-            // Try multiple sound commands
-            const commands = [
-                'termux-beep',
-                'termux-media-player play /system/media/audio/notifications/Beep.ogg',
-                'termux-tts-speak "New lead detected"'
-            ];
-            
-            for (const command of commands) {
-                try {
-                    await new Promise((resolve, reject) => {
-                        exec(command, (error) => {
-                            if (!error) {
-                                console.log(`🔊 Sound notification played using: ${command}`);
-                                resolve();
-                            } else {
-                                reject(error);
-                            }
-                        });
+        
+        // Method 1: PowerShell console beep
+        try {
+            await new Promise((resolve, reject) => {
+                exec('powershell -c [console]::beep(1000,1000)', (error) => {
+                    if (!error) {
+                        console.log('✅ Beep played successfully');
+                        resolve();
+                    } else {
+                        reject(error);
+                    }
+                });
+            });
+        } catch (error) {
+            // Method 2: Windows command prompt beep
+            try {
+                await new Promise((resolve, reject) => {
+                    exec('cmd /c echo \x07', (error) => {
+                        if (!error) {
+                            console.log('✅ Beep played successfully (fallback method)');
+                            resolve();
+                        } else {
+                            reject(error);
+                        }
                     });
-                    break; // If successful, stop trying other commands
-                } catch (e) {
-                    console.log(`Failed to play sound with ${command}, trying next...`);
-                }
+                });
+            } catch (error) {
+                console.log('ℹ️ Beep notification skipped (no sound available)');
             }
-        } else {
-            console.log(`[Sound notification skipped - only works on Android]`);
         }
+        
+        console.log('========================================\n');
     } catch (error) {
-        console.error('Error in playSoundNotification:', error);
+        console.log('ℹ️ Beep notification skipped');
     }
 }
 
 // Function to vibrate phone for lead notification
 async function vibrateForLead(leadDetails) {
-    try {
-        if (!vibrateOnNewLeads) return;
-
-        const { exec } = require('child_process');
-        const platform = process.platform;
-
-        if (platform === 'android') {
-            console.log('📳 Vibrating for lead notification...');
-            
-            // Try multiple vibration commands
-            const commands = [
-                'termux-vibrate -d 1000',
-                'termux-vibrate -d 500 -f',
-                'termux-vibrate -d 1000 -f'
-            ];
-            
-            for (const command of commands) {
-                try {
-                    await new Promise((resolve, reject) => {
-                        exec(command, (error) => {
-                            if (!error) {
-                                console.log(`📳 Vibration successful using: ${command}`);
-                                resolve();
-                            } else {
-                                reject(error);
-                            }
-                        });
-                    });
-                    break; // If successful, stop trying other commands
-                } catch (e) {
-                    console.log(`Failed to vibrate with ${command}, trying next...`);
-                }
-            }
-        } else {
-            console.log(`[Vibration skipped - only works on Android]`);
-        }
-    } catch (error) {
-        console.error('Error in vibrateForLead:', error);
-    }
+    console.log('\n========================================');
+    console.log('📳 VIBRATION SKIPPED (Windows System)');
+    console.log('========================================\n');
 }
 
 // Function to send lead alert to admin
@@ -1825,7 +1858,7 @@ async function startWhatsAppBot() {
     // Handle incoming messages
     sock.ev.on('messages.upsert', async ({ messages }) => {
         if (isProcessingMessage) {
-            terminalUI.printWarning("Already processing a message, skipping...");
+            console.log('⏳ Already processing a message, skipping...');
             return;
         }
 
@@ -1848,42 +1881,16 @@ async function startWhatsAppBot() {
                 // Get message content and type
                 let messageContent = '';
                 let messageType = 'text';
-                let mediaInfo = null;
-                let combinedContent = '';
 
                 // Extract text content
                 if (message.message?.conversation) {
                     messageContent = message.message.conversation;
-                    combinedContent = messageContent;
                 } else if (message.message?.extendedTextMessage?.text) {
                     messageContent = message.message.extendedTextMessage.text;
-                    combinedContent = messageContent;
-                }
-
-                // Handle media content
-                if (message.message?.imageMessage) {
-                    messageType = 'image';
-                    const caption = message.message.imageMessage.caption || '';
-                    mediaInfo = {
-                        type: 'image',
-                        mimetype: message.message.imageMessage.mimetype,
-                        url: message.message.imageMessage.url
-                    };
-                    combinedContent = `${messageContent}\n[Image: ${caption}]`;
-                } else if (message.message?.documentMessage) {
-                    messageType = 'document';
-                    const fileName = message.message.documentMessage.fileName || '';
-                    mediaInfo = {
-                        type: 'document',
-                        mimetype: message.message.documentMessage.mimetype,
-                        fileName: fileName,
-                        url: message.message.documentMessage.url
-                    };
-                    combinedContent = `${messageContent}\n[Document: ${fileName}]`;
                 }
 
                 // Skip empty messages
-                if (!combinedContent) continue;
+                if (!messageContent) continue;
 
                 // Get sender information
                 const sender = message.key.participant || message.key.remoteJid;
@@ -1897,96 +1904,148 @@ async function startWhatsAppBot() {
                         const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
                         const groupName = groupMetadata.subject;
 
-                        // Strictly check if this is a monitored group
+                        // Check if this is a monitored group
                         const isMonitoredGroup = groupsToMonitor.includes(groupName);
+                        if (!isMonitoredGroup) continue;
+
+                        // Check cooldown
+                        const lastMessageTime = groupLastMessageTime.get(message.key.remoteJid) || 0;
+                        const timeSinceLastMessage = Date.now() - lastMessageTime;
                         
-                        // Skip if not a monitored group
-                        if (!isMonitoredGroup) {
+                        // Always log the cooldown status for debugging
+                        console.log('\n========================================');
+                        console.log('⏰ GROUP COOLDOWN STATUS');
+                        console.log('========================================');
+                        console.log(`Group: ${groupName}`);
+                        console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
+                        console.log(`Time since last message: ${Math.floor(timeSinceLastMessage / 60000)} minutes`);
+                        console.log(`Cooldown period: ${GROUP_COOLDOWN / 60000} minutes`);
+                        console.log('========================================\n');
+                        
+                        if (timeSinceLastMessage < GROUP_COOLDOWN) {
+                            const remainingMinutes = Math.ceil((GROUP_COOLDOWN - timeSinceLastMessage) / 60000);
+                            console.log('\n========================================');
+                            console.log('⏳ GROUP COOLDOWN ACTIVE');
+                            console.log('========================================');
+                            console.log(`Group: ${groupName}`);
+                            console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
+                            console.log(`Time remaining: ${remainingMinutes} minutes`);
+                            console.log(`Next message allowed at: ${new Date(lastMessageTime + GROUP_COOLDOWN).toLocaleString()}`);
+                            console.log('========================================\n');
                             continue;
                         }
 
-                        // Skip if monitoring is disabled
-                        if (!global.botState.isMonitoring) {
-                            continue;
-                        }
+                        // Basic lead pattern check
+                        const isLead = checkForLeadPatterns(messageContent);
 
-                        // Check if we've already responded to this lead
-                        if (leadTracker.hasCheckedLead(messageId, message.key.remoteJid)) {
-                            console.log('Already responded to this lead, skipping...');
-                            continue;
-                        }
-
-                        // Check if message is about an existing lead
-                        if (leadTracker.isMessageAboutExistingLead(combinedContent, message.key.remoteJid)) {
-                            console.log('Message is about an existing lead, skipping...');
-                            continue;
-                        }
-
-                        // Get sender info
-                        let senderName = "Unknown";
-                        if (message.key.participant) {
-                            const [senderNumber] = message.key.participant.split('@');
-                            senderName = senderNumber;
-                        }
-
-                        // Add message to context
-                        leadTracker.addToContext(message.key.remoteJid, combinedContent);
-
-                        // Use AI to analyze the combined content
-                        const leadAnalysis = await aiLeadDetector.analyzeText(combinedContent, groupName, sender);
-
-                        // Only proceed if it's a new lead
-                        if (leadAnalysis.isLead && leadAnalysis.isNewLead) {
-                            terminalUI.printLead(leadAnalysis);
-
-                            // Create lead in the lead management system
-                            const lead = await leadManager.createLead({
-                                ...leadAnalysis.extractedInfo,
-                                source: `Group: ${groupName}`,
-                                sender: senderName,
-                                message: combinedContent,
-                                messageType: messageType,
-                                mediaInfo: mediaInfo,
-                                priority: leadAnalysis.priority
-                            });
-
-                            // Add to lead tracker
-                            leadTracker.addLead(message.key.remoteJid, lead);
-                            leadTracker.markLeadAsChecked(messageId, message.key.remoteJid);
-
-                            // Update lead statistics
-                            global.botState.updateLeadStats(leadAnalysis.priority === 'High');
-
-                            // Log the lead
-                            logLead(`Group: "${groupName}"`, combinedContent, leadAnalysis);
-
+                        if (isLead) {
+                            console.log('\n========================================');
+                            console.log('🎯 NEW LEAD DETECTED');
+                            console.log('========================================');
+                            console.log(`Group: ${groupName}`);
+                            console.log(`Message: ${messageContent}`);
+                            console.log('========================================');
+                            
+                            // Update cooldown timer and save it
+                            const currentTime = Date.now();
+                            groupLastMessageTime.set(message.key.remoteJid, currentTime);
+                            saveGroupCooldowns(groupLastMessageTime);
+                            console.log(`✅ Cooldown timer set for ${groupName}`);
+                            console.log(`Next message allowed at: ${new Date(currentTime + GROUP_COOLDOWN).toLocaleString()}`);
+                            
                             // Send notifications
-                            await notifyNewLead(leadAnalysis);
-                            await sendLeadAlert(sock, `Group: ${groupName}`, combinedContent, leadAnalysis);
+                            await vibrateForLead({ isLead: true });
+                            await playSoundNotification({ isLead: true });
 
                             // Send "Checking" message
-                            await messageQueue.add({
-                                sock,
-                                to: message.key.remoteJid,
-                                text: "Checking team"
-                            });
-
-                            // Show updated statistics
-                            const stats = await leadManager.getLeadStats();
-                            terminalUI.printStats(stats);
+                            console.log('\n========================================');
+                            console.log('📤 SENDING "CHECKING TEAM" MESSAGE');
+                            console.log('========================================');
+                            try {
+                                await sock.sendMessage(message.key.remoteJid, { text: "Checking team" });
+                                console.log('✅ Message sent successfully');
+                            } catch (error) {
+                                console.log('❌ Failed to send message:', error.message);
+                            }
+                            console.log('========================================\n');
                         }
                     } catch (error) {
-                        terminalUI.printError(`Error processing group message: ${error.message}`);
+                        console.log('\n========================================');
+                        console.log('❌ ERROR PROCESSING GROUP MESSAGE');
+                        console.log('========================================');
+                        console.log(`Error: ${error.message}`);
+                        console.log('========================================\n');
                     }
-                } else {
+                } else if (sender === SISTER_NUMBER) {
                     // Handle direct messages from sister's number
-                    if (sender === SISTER_NUMBER) {
-                        await handleLeadResponse(sock, message);
+                    console.log('\n========================================');
+                    console.log('📱 SISTER\'S MESSAGE RECEIVED');
+                    console.log('========================================');
+                    console.log(`💬 Content: ${messageContent}`);
+                    
+                    // Check sister's cooldown
+                    const lastMessageTime = sisterLastMessageTime.get(SISTER_NUMBER) || 0;
+                    const timeSinceLastMessage = Date.now() - lastMessageTime;
+                    
+                    console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
+                    console.log(`Time since last message: ${Math.floor(timeSinceLastMessage / 60000)} minutes`);
+                    console.log(`Cooldown period: ${GROUP_COOLDOWN / 60000} minutes`);
+                    console.log('========================================\n');
+
+                    if (timeSinceLastMessage < GROUP_COOLDOWN) {
+                        const remainingMinutes = Math.ceil((GROUP_COOLDOWN - timeSinceLastMessage) / 60000);
+                        console.log('\n========================================');
+                        console.log('⏳ SISTER\'S COOLDOWN ACTIVE');
+                        console.log('========================================');
+                        console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
+                        console.log(`Time remaining: ${remainingMinutes} minutes`);
+                        console.log(`Next message allowed at: ${new Date(lastMessageTime + GROUP_COOLDOWN).toLocaleString()}`);
+                        console.log('========================================\n');
+                        continue;
+                    }
+
+                    // Basic lead pattern check
+                    const isLead = checkForLeadPatterns(messageContent);
+
+                    if (isLead) {
+                        console.log('\n========================================');
+                        console.log('🎯 NEW LEAD FROM SISTER');
+                        console.log('========================================');
+                        console.log(`Message: ${messageContent}`);
+                        console.log('========================================');
+                        
+                        // Update sister's cooldown timer
+                        const currentTime = Date.now();
+                        sisterLastMessageTime.set(SISTER_NUMBER, currentTime);
+                        console.log(`✅ Cooldown timer set for sister`);
+                        console.log(`Next message allowed at: ${new Date(currentTime + GROUP_COOLDOWN).toLocaleString()}`);
+                        
+                        // Send notifications
+                        await vibrateForLead({ isLead: true });
+                        await playSoundNotification({ isLead: true });
+
+                        // Send "Checking" message to sister
+                        console.log('\n========================================');
+                        console.log('📤 SENDING "CHECKING TEAM" TO SISTER');
+                        console.log('========================================');
+                        try {
+                            await sock.sendMessage(SISTER_NUMBER, { text: "Checking team" });
+                            console.log('✅ Message sent successfully to sister');
+                        } catch (error) {
+                            console.log('❌ Failed to send message to sister:', error.message);
+                        }
+                        console.log('========================================\n');
+                    } else {
+                        console.log('ℹ️ Not a lead, skipping');
                     }
                 }
             }
         } catch (error) {
-            terminalUI.printError(`Error processing messages: ${error.message}`);
+            console.log('\n========================================');
+            console.log('❌ ERROR PROCESSING MESSAGES');
+            console.log('========================================');
+            console.log(`Error: ${error.message}`);
+            console.log('========================================\n');
         } finally {
             isProcessingMessage = false;
         }
@@ -2042,6 +2101,8 @@ async function handleLeadResponse(sock, message) {
 
 // Simple function to check for lead patterns
 function checkForLeadPatterns(text) {
+    if (!text) return false;
+    
     const patterns = {
         // Customer Identifiers
         name: /(?:name|patient|customer|cx|pt\s*name)[\s:]+([a-zA-Z\s\.]+)/i,
@@ -2068,7 +2129,10 @@ function checkForLeadPatterns(text) {
         potentialAmount: /\b\d{4,6}\b/,
         
         // Time periods
-        timePeriod: /\b\d+\s*(?:months?|years?|days?)\b/i
+        timePeriod: /\b\d+\s*(?:months?|years?|days?)\b/i,
+
+        // Common lead-related words
+        leadWords: /(?:lead|case|patient|customer|client|enquiry|query|details|information)/i
     };
 
     // Check for essential lead components
@@ -2078,15 +2142,10 @@ function checkForLeadPatterns(text) {
     const hasContext = patterns.context.test(text);
     const hasStatus = patterns.status.test(text);
     const hasTimePeriod = patterns.timePeriod.test(text);
+    const hasLeadWords = patterns.leadWords.test(text);
 
-    // A message is considered a lead if it has:
-    // 1. Contact information (name/phone/email) OR
-    // 2. Financial information (amount/potential amount) OR
-    // 3. Location information OR
-    // 4. Context phrases OR
-    // 5. Customer status OR
-    // 6. Time period with a number
-    return hasContactInfo || hasFinancialInfo || hasLocationInfo || hasContext || hasStatus || hasTimePeriod;
+    // A message is considered a lead if it has any of these:
+    return hasContactInfo || hasFinancialInfo || hasLocationInfo || hasContext || hasStatus || hasTimePeriod || hasLeadWords;
 }
 
 // Start the bot
