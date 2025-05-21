@@ -1405,43 +1405,37 @@ async function playSoundNotification(leadDetails) {
         const platform = process.platform;
 
         if (platform === 'android') {
-            console.log('🔊 Playing beep notification...');
+            console.log('🔊 Playing notification sound...');
             
-            // Use Termux's beep command for a simple beep sound
-            const command = 'termux-beep';
+            // Try multiple sound commands
+            const commands = [
+                'termux-beep',
+                'termux-media-player play /system/media/audio/notifications/Beep.ogg',
+                'termux-tts-speak "New lead detected"'
+            ];
             
-            await new Promise((resolve, reject) => {
-                exec(command, (error) => {
-                    if (error) {
-                        console.error('Beep notification error:', error);
-                        reject(error);
-                    } else {
-                        console.log('🔊 Beep notification played successfully');
-                        resolve();
-                    }
-                });
-            });
+            for (const command of commands) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        exec(command, (error) => {
+                            if (!error) {
+                                console.log(`🔊 Sound notification played using: ${command}`);
+                                resolve();
+                            } else {
+                                reject(error);
+                            }
+                        });
+                    });
+                    break; // If successful, stop trying other commands
+                } catch (e) {
+                    console.log(`Failed to play sound with ${command}, trying next...`);
+                }
+            }
         } else {
-            console.log(`[Beep notification skipped - only works on Android]`);
+            console.log(`[Sound notification skipped - only works on Android]`);
         }
     } catch (error) {
         console.error('Error in playSoundNotification:', error);
-    }
-}
-
-// Replace the old vibrateForLead function with the new notification system
-async function notifyNewLead(leadDetails) {
-    try {
-        // First try vibration if on Android
-        if (process.platform === 'android' && vibrateOnNewLeads) {
-            await vibrateForLead(leadDetails);
-        }
-        
-        // Then play sound notification
-        await playSoundNotification(leadDetails);
-        
-    } catch (error) {
-        console.error('Error in notifyNewLead:', error);
     }
 }
 
@@ -1456,28 +1450,30 @@ async function vibrateForLead(leadDetails) {
         if (platform === 'android') {
             console.log('📳 Vibrating for lead notification...');
             
-            // Choose vibration pattern based on lead details
-            const pattern = leadDetails.isUrgent ? 
-                vibrationPatterns.urgentLead : 
-                vibrationPatterns.newLead;
+            // Try multiple vibration commands
+            const commands = [
+                'termux-vibrate -d 1000',
+                'termux-vibrate -d 500 -f',
+                'termux-vibrate -d 1000 -f'
+            ];
             
-            // Execute vibration pattern
-            for (let i = 0; i < pattern.pattern.length; i++) {
-                if (i % 2 === 0) { // Vibrate
-                    await new Promise(resolve => {
-                        exec(`termux-vibrate -d ${pattern.pattern[i]}`, (error) => {
-                            if (error) {
-                                console.error('Vibration error:', error);
+            for (const command of commands) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        exec(command, (error) => {
+                            if (!error) {
+                                console.log(`📳 Vibration successful using: ${command}`);
+                                resolve();
+                            } else {
+                                reject(error);
                             }
-                            resolve();
                         });
                     });
-                } else { // Pause
-                    await new Promise(resolve => setTimeout(resolve, pattern.pattern[i]));
+                    break; // If successful, stop trying other commands
+                } catch (e) {
+                    console.log(`Failed to vibrate with ${command}, trying next...`);
                 }
             }
-            
-            console.log('📳 Vibration pattern completed');
         } else {
             console.log(`[Vibration skipped - only works on Android]`);
         }
