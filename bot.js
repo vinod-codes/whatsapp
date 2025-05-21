@@ -6,6 +6,396 @@ const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode-terminal');
 
+// Message Queue System
+class MessageQueue {
+    constructor() {
+        this.queue = [];
+        this.processing = false;
+        this.maxRetries = 3;
+        this.retryDelay = 5000; // 5 seconds
+    }
+
+    async add(message) {
+        this.queue.push({
+            ...message,
+            retries: 0,
+            timestamp: Date.now()
+        });
+        if (!this.processing) {
+            await this.process();
+        }
+    }
+
+    async process() {
+        if (this.processing || this.queue.length === 0) return;
+        
+        this.processing = true;
+        while (this.queue.length > 0) {
+            const message = this.queue[0];
+            try {
+                await this.sendMessage(message);
+                this.queue.shift(); // Remove successful message
+            } catch (error) {
+                console.error('Error sending message:', error);
+                if (message.retries < this.maxRetries) {
+                    message.retries++;
+                    await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                } else {
+                    console.error('Max retries reached, removing message from queue');
+                    this.queue.shift();
+                }
+            }
+        }
+        this.processing = false;
+    }
+
+    async sendMessage(message) {
+        // Implementation will be added when we have the sock instance
+        return new Promise((resolve, reject) => {
+            if (!message.sock) {
+                reject(new Error('No socket connection available'));
+                return;
+            }
+            message.sock.sendMessage(message.to, { text: message.text })
+                .then(resolve)
+                .catch(reject);
+        });
+    }
+}
+
+// Create message queue instance
+const messageQueue = new MessageQueue();
+
+// State Management System
+class StateManager {
+    constructor() {
+        this.stateDir = './state';
+        this.backupDir = './state/backups';
+        this.maxBackups = 5;
+        this.backupInterval = 24 * 60 * 60 * 1000; // 24 hours
+        this.initialize();
+    }
+
+    initialize() {
+        // Create necessary directories
+        if (!fs.existsSync(this.stateDir)) {
+            fs.mkdirSync(this.stateDir, { recursive: true });
+        }
+        if (!fs.existsSync(this.backupDir)) {
+            fs.mkdirSync(this.backupDir, { recursive: true });
+        }
+
+        // Start backup scheduler
+        this.scheduleBackup();
+    }
+
+    scheduleBackup() {
+        setInterval(() => this.createBackup(), this.backupInterval);
+    }
+
+    async createBackup() {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = path.join(this.backupDir, `backup-${timestamp}`);
+
+        try {
+            // Create backup directory
+            fs.mkdirSync(backupPath, { recursive: true });
+
+            // Copy all state files
+            const files = fs.readdirSync(this.stateDir);
+            for (const file of files) {
+                if (file !== 'backups') {
+                    const sourcePath = path.join(this.stateDir, file);
+                    const destPath = path.join(backupPath, file);
+                    fs.copyFileSync(sourcePath, destPath);
+                }
+            }
+
+            // Clean up old backups
+            this.cleanupOldBackups();
+
+            console.log(`✅ Backup created successfully at ${backupPath}`);
+        } catch (error) {
+            console.error('Error creating backup:', error);
+        }
+    }
+
+    cleanupOldBackups() {
+        try {
+            const backups = fs.readdirSync(this.backupDir)
+                .map(file => ({
+                    name: file,
+                    path: path.join(this.backupDir, file),
+                    time: fs.statSync(path.join(this.backupDir, file)).mtime.getTime()
+                }))
+                .sort((a, b) => b.time - a.time);
+
+            // Remove old backups
+            while (backups.length > this.maxBackups) {
+                const oldBackup = backups.pop();
+                fs.rmSync(oldBackup.path, { recursive: true, force: true });
+                console.log(`🧹 Removed old backup: ${oldBackup.name}`);
+            }
+        } catch (error) {
+            console.error('Error cleaning up old backups:', error);
+        }
+    }
+
+    async saveState(key, data) {
+        try {
+            const filePath = path.join(this.stateDir, `${key}.json`);
+            const backupPath = `${filePath}.bak`;
+
+            // Create backup of existing file
+            if (fs.existsSync(filePath)) {
+                fs.copyFileSync(filePath, backupPath);
+            }
+
+            // Write new data
+            fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+
+            // Remove backup if write was successful
+            if (fs.existsSync(backupPath)) {
+                fs.unlinkSync(backupPath);
+            }
+
+            return true;
+        } catch (error) {
+            console.error(`Error saving state for ${key}:`, error);
+            // Restore from backup if available
+            if (fs.existsSync(backupPath)) {
+                fs.copyFileSync(backupPath, filePath);
+            }
+            return false;
+        }
+    }
+
+    async loadState(key, defaultValue = {}) {
+        try {
+            const filePath = path.join(this.stateDir, `${key}.json`);
+            if (fs.existsSync(filePath)) {
+                const data = fs.readFileSync(filePath, 'utf8');
+                return JSON.parse(data);
+            }
+            return defaultValue;
+        } catch (error) {
+            console.error(`Error loading state for ${key}:`, error);
+            return defaultValue;
+        }
+    }
+}
+
+// Create state manager instance
+const stateManager = new StateManager();
+
+// Rate Limiter
+class RateLimiter {
+    constructor() {
+        this.limits = new Map();
+        this.windows = new Map();
+        this.defaultLimit = {
+            messages: 10,    // 10 messages
+            window: 60000,   // per minute
+            cooldown: 5000   // 5 seconds between messages
+        };
+    }
+
+    setLimit(key, limit) {
+        this.limits.set(key, {
+            ...this.defaultLimit,
+            ...limit
+        });
+    }
+
+    async checkLimit(key) {
+        const limit = this.limits.get(key) || this.defaultLimit;
+        const now = Date.now();
+        
+        // Initialize window if not exists
+        if (!this.windows.has(key)) {
+            this.windows.set(key, {
+                messages: [],
+                lastMessage: 0
+            });
+        }
+
+        const window = this.windows.get(key);
+
+        // Clean up old messages
+        window.messages = window.messages.filter(time => now - time < limit.window);
+
+        // Check if we're in cooldown
+        if (now - window.lastMessage < limit.cooldown) {
+            return {
+                allowed: false,
+                waitTime: limit.cooldown - (now - window.lastMessage)
+            };
+        }
+
+        // Check if we've hit the message limit
+        if (window.messages.length >= limit.messages) {
+            return {
+                allowed: false,
+                waitTime: limit.window - (now - window.messages[0])
+            };
+        }
+
+        // Update window
+        window.messages.push(now);
+        window.lastMessage = now;
+
+        return { allowed: true };
+    }
+
+    async waitForLimit(key) {
+        const result = await this.checkLimit(key);
+        if (!result.allowed) {
+            await new Promise(resolve => setTimeout(resolve, result.waitTime));
+            return this.checkLimit(key);
+        }
+        return result;
+    }
+}
+
+// Create rate limiter instance
+const rateLimiter = new RateLimiter();
+
+// Lead Management System
+class LeadManager {
+    constructor() {
+        this.leads = new Map();
+        this.categories = ['High', 'Medium', 'Low'];
+        this.statuses = ['New', 'In Progress', 'Closed', 'Lost'];
+        this.initialize();
+    }
+
+    async initialize() {
+        // Load existing leads from state
+        const savedLeads = await stateManager.loadState('leads', {});
+        for (const [id, lead] of Object.entries(savedLeads)) {
+            this.leads.set(id, lead);
+        }
+    }
+
+    async createLead(data) {
+        const id = `LEAD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const lead = {
+            id,
+            ...data,
+            status: 'New',
+            category: this.categorizeLead(data),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            history: [{
+                action: 'Created',
+                timestamp: new Date().toISOString(),
+                details: 'Lead created'
+            }]
+        };
+
+        this.leads.set(id, lead);
+        await this.saveLeads();
+        return lead;
+    }
+
+    categorizeLead(data) {
+        // Simple categorization logic - can be enhanced
+        if (data.isUrgent || data.amount > 100000) {
+            return 'High';
+        } else if (data.amount > 50000) {
+            return 'Medium';
+        }
+        return 'Low';
+    }
+
+    async updateLead(id, updates) {
+        const lead = this.leads.get(id);
+        if (!lead) throw new Error('Lead not found');
+
+        const updatedLead = {
+            ...lead,
+            ...updates,
+            updatedAt: new Date().toISOString(),
+            history: [
+                ...lead.history,
+                {
+                    action: 'Updated',
+                    timestamp: new Date().toISOString(),
+                    details: JSON.stringify(updates)
+                }
+            ]
+        };
+
+        this.leads.set(id, updatedLead);
+        await this.saveLeads();
+        return updatedLead;
+    }
+
+    async assignLead(id, assignee) {
+        return this.updateLead(id, { assignee });
+    }
+
+    async updateStatus(id, status) {
+        if (!this.statuses.includes(status)) {
+            throw new Error('Invalid status');
+        }
+        return this.updateLead(id, { status });
+    }
+
+    async getLeads(filters = {}) {
+        let leads = Array.from(this.leads.values());
+
+        // Apply filters
+        if (filters.status) {
+            leads = leads.filter(lead => lead.status === filters.status);
+        }
+        if (filters.category) {
+            leads = leads.filter(lead => lead.category === filters.category);
+        }
+        if (filters.assignee) {
+            leads = leads.filter(lead => lead.assignee === filters.assignee);
+        }
+        if (filters.dateRange) {
+            leads = leads.filter(lead => {
+                const date = new Date(lead.createdAt);
+                return date >= filters.dateRange.start && date <= filters.dateRange.end;
+            });
+        }
+
+        return leads;
+    }
+
+    async getLeadStats() {
+        const leads = Array.from(this.leads.values());
+        return {
+            total: leads.length,
+            byStatus: this.statuses.reduce((acc, status) => {
+                acc[status] = leads.filter(lead => lead.status === status).length;
+                return acc;
+            }, {}),
+            byCategory: this.categories.reduce((acc, category) => {
+                acc[category] = leads.filter(lead => lead.category === category).length;
+                return acc;
+            }, {}),
+            conversionRate: this.calculateConversionRate(leads)
+        };
+    }
+
+    calculateConversionRate(leads) {
+        const closed = leads.filter(lead => lead.status === 'Closed').length;
+        const total = leads.length;
+        return total > 0 ? (closed / total) * 100 : 0;
+    }
+
+    async saveLeads() {
+        const leadsObj = Object.fromEntries(this.leads);
+        await stateManager.saveState('leads', leadsObj);
+    }
+}
+
+// Create lead manager instance
+const leadManager = new LeadManager();
+
 // Configure logger - set to warn level to reduce verbosity
 const logger = pino({
     level: 'warn',
@@ -108,7 +498,6 @@ const groupsToMonitor = [
     'Bajaj+ Dr Shetty',
     'Bajaj + Dr Agarwal rajaji nagar',
     'Bajaj -LC Group Bangalore',
-    'Bajaj Finance+Smiles.ai'
 ];
 
 // Enhanced professional greetings with more options
@@ -919,12 +1308,7 @@ async function startWhatsAppBot() {
                                 // Send alert to admin with enhanced details
                                 await sendLeadAlert(sock, `Group: ${groupName}`, messageContent, leadResult.leadDetails);
 
-                                // Send time-based greeting
-                                const greeting = getTimeBasedGreeting();
-                                await sock.sendMessage(message.key.remoteJid, { text: greeting });
-                                console.log(`✉️ Time-based greeting sent: "${greeting}"`);
-
-                                // Send a "Checking" message for all leads, not just test contacts
+                                // Send a "Checking" message for all leads
                                 {
                                     // Check if we've already responded to this specific message
                                     if (respondedToMessages.has(message.key.id)) {
@@ -955,23 +1339,6 @@ async function startWhatsAppBot() {
                                             return;
                                         }
 
-                                        // Check daily message limit for this group
-                                        const today = new Date().toDateString();
-                                        const lastDate = lastMessageDateInGroup.get(message.key.remoteJid) || '';
-                                        let messageCount = 0;
-
-                                        // Reset counter if day has changed
-                                        if (lastDate !== today) {
-                                            messagesPerDayInGroup.set(message.key.remoteJid, 0);
-                                            lastMessageDateInGroup.set(message.key.remoteJid, today);
-                                        }
-
-                                        // Get current message count for today
-                                        messageCount = messagesPerDayInGroup.get(message.key.remoteJid) || 0;
-
-                                        // For "Checking" messages, we don't apply the daily limit
-                                        // We only use the 1-hour cooldown between messages
-
                                         try {
                                             isSendingResponse = true;
                                             const testResponse = "Checking team";
@@ -984,77 +1351,11 @@ async function startWhatsAppBot() {
 
                                             // Mark this message as responded to with timestamp
                                             respondedToMessages.set(message.key.id, Date.now());
-
-                                            // Increment the daily message counter
-                                            messagesPerDayInGroup.set(message.key.remoteJid, messageCount + 1);
-                                            saveStateToFile(messagesPerDayInGroup, MESSAGES_PER_DAY_FILE);
-
-                                            // Update the last message date
-                                            lastMessageDateInGroup.set(message.key.remoteJid, today);
-                                            saveStateToFile(lastMessageDateInGroup, LAST_MESSAGE_DATE_FILE);
-
-                                            console.log(`📊 "Checking" message sent (1-hour cooldown applies)`);
                                         } finally {
                                             isSendingResponse = false;
                                         }
-
-                                        // Limit the size of respondedToMessages set to prevent memory leaks
-                                        if (respondedToMessages.size > 1000) {
-                                            const iterator = respondedToMessages.values();
-                                            for (let i = 0; i < 200; i++) {
-                                                respondedToMessages.delete(iterator.next().value);
-                                            }
-                                        }
                                     } else {
                                         console.log(`⏱️ Skipping response - last response was ${minutesSinceLastResponse.toFixed(1)} minutes ago`);
-                                    }
-                                }
-
-                                // For regular leads, check time-based rules
-                                const now = new Date().getTime();
-                                const lastGreeting = lastGreetingSent.get(message.key.remoteJid) || 0;
-                                const hoursSinceLastGreeting = (now - lastGreeting) / (1000 * 60 * 60);
-
-                                // Only send greeting if it's been at least 1 hour since the last one
-                                if (hoursSinceLastGreeting >= 1) {
-                                    // Check daily message limit for this group
-                                    const today = new Date().toDateString();
-                                    const lastDate = lastMessageDateInGroup.get(message.key.remoteJid) || '';
-                                    let messageCount = 0;
-
-                                    // Reset counter if day has changed
-                                    if (lastDate !== today) {
-                                        messagesPerDayInGroup.set(message.key.remoteJid, 0);
-                                        lastMessageDateInGroup.set(message.key.remoteJid, today);
-                                    }
-
-                                    // Get current message count for today
-                                    messageCount = messagesPerDayInGroup.get(message.key.remoteJid) || 0;
-
-                                    // Check if we've reached the daily limit for greetings
-                                    if (messageCount >= MAX_GREETINGS_PER_DAY_IN_GROUP) {
-                                        console.log(`⚠️ Daily greeting limit (${MAX_GREETINGS_PER_DAY_IN_GROUP} times per day) reached for this group. Skipping greeting.`);
-                                        return;
-                                    }
-
-                                    const greeting = getTimeBasedGreeting();
-
-                                    // Only send greeting if within allowed hours (9 AM - 5 PM)
-                                    if (greeting && global.botState.isGreeting) {
-                                        await sock.sendMessage(message.key.remoteJid, { text: greeting });
-                                        console.log(`✉️ Greeting sent: "${greeting}"`);
-                                        lastGreetingSent.set(message.key.remoteJid, now);
-                                        saveStateToFile(lastGreetingSent, LAST_GREETING_FILE);
-
-                                        // Increment the daily message counter
-                                        messagesPerDayInGroup.set(message.key.remoteJid, messageCount + 1);
-                                        saveStateToFile(messagesPerDayInGroup, MESSAGES_PER_DAY_FILE);
-
-                                        // Update the last message date
-                                        lastMessageDateInGroup.set(message.key.remoteJid, today);
-                                        saveStateToFile(lastMessageDateInGroup, LAST_MESSAGE_DATE_FILE);
-
-                                        console.log(`📊 Greeting message count for today: ${messageCount + 1}/${MAX_GREETINGS_PER_DAY_IN_GROUP}`);
                                     }
                                 }
                             } else {
@@ -1104,7 +1405,7 @@ async function startWhatsAppBot() {
                         // Send alert to admin with enhanced details
                         await sendLeadAlert(sock, `Direct Message: ${message.key.remoteJid}`, messageContent, leadResult.leadDetails);
 
-                        // Send a "Checking" message for all leads, not just test contacts
+                        // Send a "Checking" message for all leads
                         {
                             // Check if we've already responded to this specific message
                             if (respondedToMessages.has(message.key.id)) {
@@ -1150,28 +1451,8 @@ async function startWhatsAppBot() {
                                 } finally {
                                     isSendingResponse = false;
                                 }
-
-                                // We now clean up old messages based on timestamp instead of size
                             } else {
                                 console.log(`⏱️ Skipping response - last response was ${minutesSinceLastResponse.toFixed(1)} minutes ago`);
-                            }
-                        }
-
-                        // For regular leads, check time-based rules
-                        const now = new Date().getTime();
-                        const lastGreeting = lastGreetingSent.get(message.key.remoteJid) || 0;
-                        const hoursSinceLastGreeting = (now - lastGreeting) / (1000 * 60 * 60);
-
-                        // Only send greeting if it's been at least 1 hour since the last one
-                        if (hoursSinceLastGreeting >= 1) {
-                            const greeting = getTimeBasedGreeting();
-
-                            // Only send greeting if within allowed hours (9 AM - 5 PM)
-                            if (greeting && global.botState.isGreeting) {
-                                await sock.sendMessage(message.key.remoteJid, { text: greeting });
-                                console.log(`✉️ Greeting sent: "${greeting}"`);
-                                lastGreetingSent.set(message.key.remoteJid, now);
-                                saveStateToFile(lastGreetingSent, LAST_GREETING_FILE);
                             }
                         }
                     } else {
