@@ -18,9 +18,16 @@
   "license": "ISC",
   "dependencies": {
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.5.0",
+    "@whiskeysockets/baileys": "^6.7.17",
+    "body-parser": "^2.2.0",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-notifier": "^10.0.1",
     "openai": "^4.0.0",
-    "pino": "^8.15.0",
+    "pino": "^8.21.0",
     "pino-pretty": "^10.2.0",
     "qrcode-terminal": "^0.12.0"
   }
