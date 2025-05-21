@@ -1469,28 +1469,29 @@ async function playSoundNotification(leadDetails) {
         console.log('🔊 PLAYING NOTIFICATION BEEP');
         console.log('========================================');
         
-        // Try multiple methods to play beep
-        const { exec } = require('child_process');
-        
-        // Method 1: PowerShell console beep
-        try {
+        // Check if running in Termux
+        if (process.platform === 'android') {
+            // Use Termux API for sound
+            const { exec } = require('child_process');
             await new Promise((resolve, reject) => {
-                exec('powershell -c [console]::beep(1000,1000)', (error) => {
+                exec('termux-media-player play /system/media/audio/notifications/Beep_01.ogg', (error) => {
                     if (!error) {
-                        console.log('✅ Beep played successfully');
+                        console.log('✅ Beep played successfully (Termux)');
                         resolve();
                     } else {
+                        console.log('ℹ️ Termux sound failed, trying fallback');
                         reject(error);
                     }
                 });
             });
-        } catch (error) {
-            // Method 2: Windows command prompt beep
+        } else {
+            // Windows fallback
+            const { exec } = require('child_process');
             try {
                 await new Promise((resolve, reject) => {
-                    exec('cmd /c echo \x07', (error) => {
+                    exec('powershell -c [console]::beep(1000,1000)', (error) => {
                         if (!error) {
-                            console.log('✅ Beep played successfully (fallback method)');
+                            console.log('✅ Beep played successfully (Windows)');
                             resolve();
                         } else {
                             reject(error);
@@ -1498,21 +1499,59 @@ async function playSoundNotification(leadDetails) {
                     });
                 });
             } catch (error) {
-                console.log('ℹ️ Beep notification skipped (no sound available)');
+                try {
+                    await new Promise((resolve, reject) => {
+                        exec('cmd /c echo \x07', (error) => {
+                            if (!error) {
+                                console.log('✅ Beep played successfully (Windows fallback)');
+                                resolve();
+                            } else {
+                                reject(error);
+                            }
+                        });
+                    });
+                } catch (error) {
+                    console.log('ℹ️ Sound notification skipped (no sound available)');
+                }
             }
         }
         
         console.log('========================================\n');
     } catch (error) {
-        console.log('ℹ️ Beep notification skipped');
+        console.log('ℹ️ Sound notification skipped');
     }
 }
 
 // Function to vibrate phone for lead notification
 async function vibrateForLead(leadDetails) {
-    console.log('\n========================================');
-    console.log('📳 VIBRATION SKIPPED (Windows System)');
-    console.log('========================================\n');
+    try {
+        console.log('\n========================================');
+        console.log('📳 VIBRATION NOTIFICATION');
+        console.log('========================================');
+        
+        // Check if running in Termux
+        if (process.platform === 'android') {
+            // Use Termux API for vibration
+            const { exec } = require('child_process');
+            await new Promise((resolve, reject) => {
+                exec('termux-vibrate -d 1000', (error) => {
+                    if (!error) {
+                        console.log('✅ Vibration successful (Termux)');
+                        resolve();
+                    } else {
+                        console.log('ℹ️ Termux vibration failed');
+                        reject(error);
+                    }
+                });
+            });
+        } else {
+            console.log('ℹ️ Vibration skipped (not running in Termux)');
+        }
+        
+        console.log('========================================\n');
+    } catch (error) {
+        console.log('ℹ️ Vibration notification skipped');
+    }
 }
 
 // Function to send lead alert to admin
