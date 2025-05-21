@@ -532,6 +532,25 @@ function logLead(source, message, leadDetails) {
     }
 }
 
+// Function to get group ID from name
+async function getGroupId(sock, groupName) {
+    try {
+        // Get all groups the bot is part of
+        const groups = await sock.groupFetchAllParticipating();
+        
+        // Find the group that matches the name
+        for (const [id, group] of Object.entries(groups)) {
+            if (group.subject === groupName || group.subject.includes(groupName)) {
+                return id;
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error('Error getting group ID:', error);
+        return null;
+    }
+}
+
 // === Main Control Menu ===
 function startTestMenu(sock) {
     const readline = require('readline');
@@ -623,10 +642,12 @@ function startTestMenu(sock) {
                                     console.log('\nSending greetings to all groups...');
                                     for (const group of groupsToMonitor) {
                                         try {
-                                            const groupId = await sock.groupGetIdFromInviteLink(group);
+                                            const groupId = await getGroupId(sock, group);
                                             if (groupId) {
                                                 await sock.sendMessage(groupId, { text: greeting });
                                                 console.log(`✅ Greeting sent to: ${group}`);
+                                            } else {
+                                                console.log(`❌ Could not find group: ${group}`);
                                             }
                                         } catch (e) {
                                             console.log(`❌ Failed to send to ${group}: ${e.message}`);
@@ -711,16 +732,23 @@ async function startWhatsAppBot() {
 
         // If QR code is received, display it
         if (qr) {
+            console.log('\n========================================');
+            console.log('🔐 NEW QR CODE GENERATED');
+            console.log('========================================');
             console.log('Scan this QR code to authenticate:');
             qrcode.generate(qr, { small: true });
             console.log('If QR code is not visible, restart the bot or try a different terminal');
+            console.log('========================================\n');
         }
 
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const isConflict = lastDisconnect?.error?.output?.payload?.message === 'conflict';
             
-            console.log('Connection closed due to:', lastDisconnect?.error?.message);
+            console.log('\n========================================');
+            console.log('❌ CONNECTION CLOSED');
+            console.log('========================================');
+            console.log('Reason:', lastDisconnect?.error?.message);
 
             if (isConflict) {
                 console.log('\n⚠️ CONFLICT DETECTED: Another instance is running or WhatsApp is logged in elsewhere');
@@ -729,7 +757,7 @@ async function startWhatsAppBot() {
                 console.log('2. Log out of WhatsApp Web on other devices');
                 console.log('3. Clear auth files: rm -rf auth_info_baileys/*');
                 console.log('4. Restart the bot: node bot.js\n');
-                process.exit(1); // Exit instead of reconnecting
+                process.exit(1);
             }
 
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
@@ -737,10 +765,15 @@ async function startWhatsAppBot() {
                 : true;
 
             if (shouldReconnect) {
-                console.log('Reconnecting...');
+                console.log('\n🔄 Attempting to reconnect...');
+                console.log('A new QR code will be generated if needed');
+                console.log('========================================\n');
                 startWhatsAppBot();
             } else {
-                console.log('Not reconnecting.');
+                console.log('\n❌ Not reconnecting - logged out');
+                console.log('Please restart the bot to generate a new QR code');
+                console.log('========================================\n');
+                process.exit(1);
             }
         } else if (connection === 'open') {
             console.log('\n========================================');
