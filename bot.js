@@ -1992,49 +1992,55 @@ async function startWhatsAppBot() {
                     console.log(`Cooldown period: ${GROUP_COOLDOWN / 60000} minutes`);
                     console.log('========================================\n');
 
-                    if (timeSinceLastMessage < GROUP_COOLDOWN) {
-                        const remainingMinutes = Math.ceil((GROUP_COOLDOWN - timeSinceLastMessage) / 60000);
-                        console.log('\n========================================');
-                        console.log('⏳ SISTER\'S COOLDOWN ACTIVE');
-                        console.log('========================================');
-                        console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
-                        console.log(`Time remaining: ${remainingMinutes} minutes`);
-                        console.log(`Next message allowed at: ${new Date(lastMessageTime + GROUP_COOLDOWN).toLocaleString()}`);
-                        console.log('========================================\n');
-                        continue;
-                    }
-
                     // Basic lead pattern check
                     const isLead = checkForLeadPatterns(messageContent);
 
                     if (isLead) {
-                        console.log('\n========================================');
-                        console.log('🎯 NEW LEAD FROM SISTER');
-                        console.log('========================================');
-                        console.log(`Message: ${messageContent}`);
-                        console.log('========================================');
-                        
-                        // Update sister's cooldown timer
-                        const currentTime = Date.now();
-                        sisterLastMessageTime.set(SISTER_NUMBER, currentTime);
-                        console.log(`✅ Cooldown timer set for sister`);
-                        console.log(`Next message allowed at: ${new Date(currentTime + GROUP_COOLDOWN).toLocaleString()}`);
-                        
-                        // Send notifications
-                        await vibrateForLead({ isLead: true });
-                        await playSoundNotification({ isLead: true });
+                        if (timeSinceLastMessage < GROUP_COOLDOWN) {
+                            // During cooldown, just alert without replying
+                            const remainingMinutes = Math.ceil((GROUP_COOLDOWN - timeSinceLastMessage) / 60000);
+                            console.log('\n========================================');
+                            console.log('⚠️ POTENTIAL LEAD DURING COOLDOWN');
+                            console.log('========================================');
+                            console.log(`Message: ${messageContent}`);
+                            console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
+                            console.log(`Time remaining: ${remainingMinutes} minutes`);
+                            console.log(`Next message allowed at: ${new Date(lastMessageTime + GROUP_COOLDOWN).toLocaleString()}`);
+                            console.log('========================================\n');
+                            
+                            // Send alert notifications
+                            await vibrateForLead({ isLead: true });
+                            await playSoundNotification({ isLead: true });
+                        } else {
+                            // Not in cooldown, proceed normally
+                            console.log('\n========================================');
+                            console.log('🎯 NEW LEAD FROM SISTER');
+                            console.log('========================================');
+                            console.log(`Message: ${messageContent}`);
+                            console.log('========================================');
+                            
+                            // Update sister's cooldown timer
+                            const currentTime = Date.now();
+                            sisterLastMessageTime.set(SISTER_NUMBER, currentTime);
+                            console.log(`✅ Cooldown timer set for sister`);
+                            console.log(`Next message allowed at: ${new Date(currentTime + GROUP_COOLDOWN).toLocaleString()}`);
+                            
+                            // Send notifications
+                            await vibrateForLead({ isLead: true });
+                            await playSoundNotification({ isLead: true });
 
-                        // Send "Checking" message to sister
-                        console.log('\n========================================');
-                        console.log('📤 SENDING "CHECKING TEAM" TO SISTER');
-                        console.log('========================================');
-                        try {
-                            await sock.sendMessage(SISTER_NUMBER, { text: "Checking team" });
-                            console.log('✅ Message sent successfully to sister');
-                        } catch (error) {
-                            console.log('❌ Failed to send message to sister:', error.message);
+                            // Send "Checking" message to sister
+                            console.log('\n========================================');
+                            console.log('📤 SENDING "CHECKING TEAM" TO SISTER');
+                            console.log('========================================');
+                            try {
+                                await sock.sendMessage(SISTER_NUMBER, { text: "Checking team" });
+                                console.log('✅ Message sent successfully to sister');
+                            } catch (error) {
+                                console.log('❌ Failed to send message to sister:', error.message);
+                            }
+                            console.log('========================================\n');
                         }
-                        console.log('========================================\n');
                     } else {
                         console.log('ℹ️ Not a lead, skipping');
                     }
