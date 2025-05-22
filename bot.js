@@ -1143,26 +1143,25 @@ const MAX_GREETINGS_PER_DAY_IN_GROUP = 2;
 
 // Updated: Full list of groups to monitor
 const groupsToMonitor = [
-    'Bajaj + Dr Agarwal rajji nagar',
-    'Bajaj + Dr Shetty',
-    'Orane + Bajaj finserv',
-    'Partha+Bajaj Bangalore',
-    'Bajaj + Nethradama Rajajinagar',
-    'Headz + Bajaj FINSERV',
-    'Bajaj +REHABILITATIONS specialist',
-    'Bajaj + Ad gro (OZIVIT)',
-    'Bajaj+ Priya hearing',
-    'Bajaj-Rehamo',
-    'Bajaj+ Baby sience',
-    'Bajaj+ LAKME RAJJINAGAR',
-    'Bajaj + Isha',
-    'VASAN EYE CARE + BAJAJ FINSERV',
-    'LC Rok + bajaj',
-    'Bajaj Fin and SleepMed',
-    'Bajaj+Partha Dasarahalli',
-    'Vlcc + bajaj rajji nagar',
-    'Bajaj + Cozmo BLIS',
-    'Bajaj Finance+Smiles.ai'  // Special group with Hyderabad rule
+  "Bajaj+ Baby Science",
+  "Bajaj-Rehamo",
+  "Bajaj +Rehabilitations Specialist",
+  "Bajaj + Nethradama Rajajinagar",
+  "Bajaj +Partha Dasarahalli",
+  "VLCC +Bajaj Rajaji Nagar",
+  "Headz + Bajaj Finserv",
+  "Bajaj + Cozmo BiIS",
+  "Bajaj + Isha",
+  "Bajaj+ Lakme Rajajinagar",
+  "Bajaj + Dr Agarwal Rajaji Nagar",
+  "Bajaj+ Priya Hearing",
+  "Bajaj Fin and SleepMed",
+  "Bajaj + Ad Gro (OZIVIT)",
+  "Orane + Bajaj Finserv",
+  "LC Rok + Bajaj",
+  "Vasan Eye Care + Bajaj Finserv",
+  "Bajaj -LC Group Bangalore",
+  "Partha+Bajaj Bangalore"
 ];
 
 // Add special group rules
