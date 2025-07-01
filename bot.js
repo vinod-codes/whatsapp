@@ -1143,25 +1143,24 @@ const MAX_GREETINGS_PER_DAY_IN_GROUP = 2;
 
 // Updated: Full list of groups to monitor
 const groupsToMonitor = [
-  "Bajaj+ Baby Science",
-  "Bajaj-Rehamo",
-  "Bajaj +Rehabilitations Specialist",
-  "Bajaj + Nethradama Rajajinagar",
-  "Bajaj +Partha Dasarahalli",
-  "VLCC +Bajaj Rajaji Nagar",
-  "Headz + Bajaj Finserv",
-  "Bajaj + Cozmo BiIS",
-  "Bajaj + Isha",
-  "Bajaj+ Lakme Rajajinagar",
-  "Bajaj + Dr Agarwal Rajaji Nagar",
-  "Bajaj+ Priya Hearing",
+  "Bajaj-LC Group Bangalore",
+  "Bajaj + Dr Agarwal rajaji nagar",
+  "Partha+Bajaj Bangalore",
   "Bajaj Fin and SleepMed",
-  "Bajaj + Ad Gro (OZIVIT)",
-  "Orane + Bajaj Finserv",
-  "LC Rok + Bajaj",
-  "Vasan Eye Care + Bajaj Finserv",
-  "Bajaj -LC Group Bangalore",
-  "Partha+Bajaj Bangalore"
+  "Bajaj+ Lakme Rajajinagar",
+  "Bajaj + Isha",
+  "Headz + Bajaj Finserv",
+  "Bajaj + Nethradama Rajajinagar",
+  "Bajaj-Rehamo",
+  "Lc Rok + bajaj",
+  "VASAN EYE CARE + BAJAJ FIN",
+  "Bajaj+ Hsn",
+  "Bajaj+ Priya hearing",
+  "Bajaj Baby sience",
+  "Bajaj + Ad gro (OZIVIT)",
+  "Bajaj+ Dr Shetty",
+  "Bajaj +Partha Dasarahalli",
+  "Vicc +bajaj rajaji nagar"
 ];
 
 // Add special group rules
@@ -1636,7 +1635,7 @@ async function getGroupId(sock, groupName) {
 }
 
 // === Main Control Menu ===
-function startTestMenu(sock) {
+function startGreetingMenu(sock) {
     const readline = require('readline');
     const rl = readline.createInterface({
         input: process.stdin,
@@ -1644,158 +1643,133 @@ function startTestMenu(sock) {
     });
     const sisterNumber = '919686693567@s.whatsapp.net';
 
-    // Track menu state
-    let isMonitoring = true;
-    let leadStats = {
-        totalLeads: 0,
-        todayLeads: 0,
-        urgentLeads: 0
-    };
+    function sendGreeting(target, type) {
+        let greeting;
+        switch(type) {
+            case '1': greeting = professionalGreetings.morning[0]; break;
+            case '2': greeting = professionalGreetings.afternoon[0]; break;
+            case '3': greeting = professionalGreetings.evening[0]; break;
+            case '4': greeting = professionalGreetings.weekend[0]; break;
+            case '5': greeting = professionalGreetings.monthEnd[0]; break;
+            default: greeting = professionalGreetings.morning[0]; break;
+        }
+        if (target === '1') {
+            // Send to sister
+            sock.sendMessage(sisterNumber, { text: greeting }).then(() => {
+                console.log('✅ Greeting sent to sister!');
+                showMenu();
+            });
+        } else if (target === '2') {
+            // Send to all groups
+            console.log('\nSending greetings to all groups...');
+            (async () => {
+                for (const group of groupsToMonitor) {
+                    try {
+                        const groupId = await getGroupId(sock, group);
+                        if (groupId) {
+                            await sock.sendMessage(groupId, { text: greeting });
+                            console.log(`✅ Greeting sent to: ${group}`);
+                        } else {
+                            console.log(`❌ Could not find group: ${group}`);
+                        }
+                    } catch (e) {
+                        console.log(`❌ Failed to send to ${group}: ${e.message}`);
+                    }
+                }
+                console.log('\n✅ Greeting distribution completed!');
+                showMenu();
+            })();
+        }
+    }
 
     function showMenu() {
         console.log('\n========================================');
-        console.log('         WHATSAPP LEAD MONITOR          ');
+        console.log('            SEND GREETINGS              ');
         console.log('========================================');
-        console.log('1. Send Greetings');
-        console.log('2. View Lead Statistics');
-        console.log('3. View Active Groups');
-        console.log('4. Exit');
+        console.log('1. Send to Sister');
+        console.log('2. Send to All Groups');
+        console.log('3. Test All Groups (Dry Run)');
+        console.log('4. Logout from Device');
+        console.log('5. Back to Main Menu');
         console.log('========================================');
-        rl.question('\nChoose an option: ', async (answer) => {
-            switch(answer) {
-                case '1':
-                    console.log('\n========================================');
-                    console.log('            SEND GREETINGS              ');
-                    console.log('========================================');
-                    console.log('1. Send to Sister');
-                    console.log('2. Send to All Groups');
-                    console.log('3. Back to Main Menu');
-                    console.log('========================================');
-                    rl.question('\nSelect target: ', async (target) => {
-                        if (target === '3') {
-                            showMenu();
-                            return;
-                        }
 
-                        console.log('\n========================================');
-                        console.log('            GREETING TYPES            ');
-                        console.log('========================================');
-                        console.log('1. Morning Greeting');
-                        console.log('2. Afternoon Greeting');
-                        console.log('3. Evening Greeting');
-                        console.log('4. Weekend Greeting');
-                        console.log('5. Month-End Greeting');
-                        console.log('6. Back to Previous Menu');
-                        console.log('========================================');
-                        rl.question('\nSelect greeting type: ', async (type) => {
-                            if (type === '6') {
-                                showMenu();
-                                return;
-                            }
-
-                            let greeting;
-                            switch(type) {
-                                case '1':
-                                    greeting = professionalGreetings.morning[0];
-                                    break;
-                                case '2':
-                                    greeting = professionalGreetings.afternoon[0];
-                                    break;
-                                case '3':
-                                    greeting = professionalGreetings.evening[0];
-                                    break;
-                                case '4':
-                                    greeting = professionalGreetings.weekend[0];
-                                    break;
-                                case '5':
-                                    greeting = professionalGreetings.monthEnd[0];
-                                    break;
-                                default:
-                                    console.log('Invalid option.');
-                                    showMenu();
-                                    return;
-                            }
-
-                            try {
-                                if (target === '1') {
-                                    // Send to sister
-                                    await sock.sendMessage(sisterNumber, { text: greeting });
-                                    console.log('✅ Greeting sent to sister!');
-                                } else if (target === '2') {
-                                    // Send to all groups
-                                    console.log('\nSending greetings to all groups...');
-                                    for (const group of groupsToMonitor) {
-                                        try {
-                                            const groupId = await getGroupId(sock, group);
-                                            if (groupId) {
-                                                await sock.sendMessage(groupId, { text: greeting });
-                                                console.log(`✅ Greeting sent to: ${group}`);
-                                            } else {
-                                                console.log(`❌ Could not find group: ${group}`);
-                                            }
-                                        } catch (e) {
-                                            console.log(`❌ Failed to send to ${group}: ${e.message}`);
-                                        }
-                                    }
-                                    console.log('\n✅ Greeting distribution completed!');
-                                }
-                            } catch (e) {
-                                console.log('❌ Failed to send greeting:', e.message);
-                            }
-                            showMenu();
-                        });
-                    });
-                    break;
-
-                case '2':
-                    console.log('\n========================================');
-                    console.log('           LEAD STATISTICS             ');
-                    console.log('========================================');
-                    console.log(`📊 Total Leads: ${leadStats.totalLeads}`);
-                    console.log(`📈 Today's Leads: ${leadStats.todayLeads}`);
-                    console.log(`⚠️ Urgent Leads: ${leadStats.urgentLeads}`);
-                    console.log('========================================\n');
-                    showMenu();
-                    break;
-
-                case '3':
-                    console.log('\n========================================');
-                    console.log('           ACTIVE GROUPS              ');
-                    console.log('========================================');
-                    groupsToMonitor.forEach((group, index) => {
-                        console.log(`${index + 1}. ${group}`);
-                    });
-                    console.log('========================================\n');
-                    showMenu();
-                    break;
-
-                case '4':
-                    console.log('\n========================================');
-                    console.log('           SHUTTING DOWN              ');
-                    console.log('========================================');
-                    console.log('Thank you for using WhatsApp Lead Monitor');
-                    console.log('========================================\n');
-                    rl.close();
-                    process.exit(0);
-                    break;
-
-                default:
-                    console.log('Invalid option.');
-                    showMenu();
+        rl.question('\nSelect target: ', async (target) => {
+            if (target === '5') {
+                showMenu(); // Or go to main menu if you have one
+                return;
             }
+            if (target === '4') {
+                // Logout: delete auth_info_baileys folder and exit
+                const fs = require('fs');
+                const path = require('path');
+                const authDir = path.join(__dirname, 'auth_info_baileys');
+                if (fs.existsSync(authDir)) {
+                    fs.rmSync(authDir, { recursive: true, force: true });
+                    console.log('\n✅ Logged out! Auth info deleted. Please restart the bot to scan a new QR code.');
+                } else {
+                    console.log('\nAuth info folder not found. Already logged out or never logged in.');
+                }
+                rl.close();
+                process.exit(0);
+                return;
+            }
+            if (target === '3') {
+                // Dry run test: check group accessibility, do not send messages
+                const failedGroups = [];
+                console.log('\n========================================');
+                console.log('      DRY RUN: TESTING ALL GROUPS       ');
+                console.log('========================================');
+                for (const group of groupsToMonitor) {
+                    try {
+                        const groupId = await getGroupId(sock, group);
+                        if (groupId) {
+                            console.log(`✅ Group accessible: ${group}`);
+                        } else {
+                            console.log(`❌ Could not find group: ${group}`);
+                            failedGroups.push(group);
+                        }
+                    } catch (e) {
+                        console.log(`❌ Error checking group ${group}: ${e.message}`);
+                        failedGroups.push(group);
+                    }
+                    // Add delay to avoid rate limiting
+                    await new Promise(res => setTimeout(res, 700));
+                }
+                if (failedGroups.length > 0) {
+                    console.log('\n❌ The following groups are NOT accessible (name mismatch or not a member):');
+                    failedGroups.forEach(g => console.log(`- ${g}`));
+                } else {
+                    console.log('\n✅ All groups are accessible!');
+                }
+                showMenu();
+                return;
+            }
+
+            console.log('\n========================================');
+            console.log('            GREETING TYPES              ');
+            console.log('========================================');
+            console.log('1. Morning Greeting');
+            console.log('2. Afternoon Greeting');
+            console.log('3. Evening Greeting');
+            console.log('4. Weekend Greeting');
+            console.log('5. Month-End Greeting');
+            console.log('6. Back to Previous Menu');
+            console.log('========================================');
+
+            rl.question('\nSelect greeting type: ', async (type) => {
+                if (type === '6') {
+                    showMenu(); // Go back to greeting target menu
+                    return;
+                }
+
+                // Call your greeting sending function here
+                await sendGreeting(target, type); // Replace with your real function
+
+                console.log('\n✅ Greeting sent!');
+                showMenu(); // Go back to greeting menu
+            });
         });
     }
-
-    // Export the state for use in message handling
-    global.botState = {
-        isMonitoring,
-        updateLeadStats: (isUrgent) => {
-            leadStats.totalLeads++;
-            leadStats.todayLeads++;
-            if (isUrgent) leadStats.urgentLeads++;
-        }
-    };
-
     showMenu();
 }
 
@@ -1825,15 +1799,21 @@ async function startWhatsAppBot() {
             console.log('========================================\n');
         }
 
+        if (connection === 'open') {
+            console.log('\n========================================');
+            console.log('         CONNECTION ESTABLISHED         ');
+            console.log('========================================');
+            // Immediately show the greeting menu
+            startGreetingMenu(sock);
+        }
+
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const isConflict = lastDisconnect?.error?.output?.payload?.message === 'conflict';
-            
             console.log('\n========================================');
             console.log('❌ CONNECTION CLOSED');
             console.log('========================================');
             console.log('Reason:', lastDisconnect?.error?.message);
-
             if (isConflict) {
                 console.log('\n⚠️ CONFLICT DETECTED: Another instance is running or WhatsApp is logged in elsewhere');
                 console.log('Please follow these steps:');
@@ -1843,11 +1823,9 @@ async function startWhatsAppBot() {
                 console.log('4. Restart the bot: node bot.js\n');
                 process.exit(1);
             }
-
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
                 ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
                 : true;
-
             if (shouldReconnect) {
                 console.log('\n🔄 Attempting to reconnect...');
                 console.log('A new QR code will be generated if needed');
@@ -1859,244 +1837,15 @@ async function startWhatsAppBot() {
                 console.log('========================================\n');
                 process.exit(1);
             }
-        } else if (connection === 'open') {
-            console.log('\n========================================');
-            console.log('         CONNECTION ESTABLISHED         ');
-            console.log('========================================');
-            console.log('📱 MONITORING GROUPS:');
-            groupsToMonitor.forEach((group, index) => {
-                console.log(`   ${index + 1}. ${group}`);
-            });
-            console.log('\n🔍 MONITORING KEYWORDS:');
-            console.log('   • Leads, clients, contacts');
-            console.log('   • Cases, approvals, payments');
-            console.log('   • CRM entries, OPP numbers');
-            console.log('   • Bajaj Finance related terms');
-            console.log('\n📝 MESSAGE LOGGING:');
-            console.log('   • All messages will be displayed below');
-            console.log('   • Lead information logged to leads_log.txt');
-            console.log('========================================\n');
-
-            // Check if we're on Android and remind about Termux API
-            if (process.platform === 'android' && vibrateOnNewLeads) {
-                console.log('\n⚠️ IMPORTANT: For vibration to work on Android, you need Termux API');
-                console.log('Run these commands in Termux if you haven\'t already:');
-                console.log('1. pkg update && pkg upgrade');
-                console.log('2. pkg install termux-api termux-services');
-                console.log('3. termux-setup-storage');
-            }
-
-            console.log('========================================\n');
         }
     });
 
     // Save credentials whenever they're updated
     sock.ev.on('creds.update', saveCreds);
-
-    // Handle incoming messages
-    sock.ev.on('messages.upsert', async ({ messages }) => {
-        if (isProcessingMessage) {
-            console.log('⏳ Already processing a message, skipping...');
-            return;
-        }
-
-        isProcessingMessage = true;
-
-        try {
-            for (const message of messages) {
-                // Skip if message has been processed already
-                const messageId = message.key.id;
-                if (processedMessages.has(messageId)) {
-                    continue;
-                }
-
-                // Mark message as processed
-                processedMessages.set(messageId, Date.now());
-
-                // Skip messages sent by the bot itself
-                if (message.key.fromMe) continue;
-
-                // Get message content and type
-                let messageContent = '';
-                let messageType = 'text';
-
-                // Extract text content
-                if (message.message?.conversation) {
-                    messageContent = message.message.conversation;
-                } else if (message.message?.extendedTextMessage?.text) {
-                    messageContent = message.message.extendedTextMessage.text;
-                }
-
-                // Skip empty messages
-                if (!messageContent) continue;
-
-                // Get sender information
-                const sender = message.key.participant || message.key.remoteJid;
-
-                // Check if message is from a group
-                const isGroup = message.key.remoteJid.endsWith('@g.us');
-
-                if (isGroup) {
-                    try {
-                        // Get group metadata
-                        const groupMetadata = await sock.groupMetadata(message.key.remoteJid);
-                        const groupName = groupMetadata.subject;
-
-                        // Check if this is a monitored group
-                        const isMonitoredGroup = groupsToMonitor.includes(groupName);
-                        if (!isMonitoredGroup) continue;
-
-                        // Check cooldown
-                        const lastMessageTime = groupLastMessageTime.get(message.key.remoteJid) || 0;
-                        const timeSinceLastMessage = Date.now() - lastMessageTime;
-                        
-                        // Always log the cooldown status for debugging
-                        console.log('\n========================================');
-                        console.log('⏰ GROUP COOLDOWN STATUS');
-                        console.log('========================================');
-                        console.log(`Group: ${groupName}`);
-                        console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
-                        console.log(`Time since last message: ${Math.floor(timeSinceLastMessage / 60000)} minutes`);
-                        console.log(`Cooldown period: ${GROUP_COOLDOWN / 60000} minutes`);
-                        console.log('========================================\n');
-                        
-                        if (timeSinceLastMessage < GROUP_COOLDOWN) {
-                            const remainingMinutes = Math.ceil((GROUP_COOLDOWN - timeSinceLastMessage) / 60000);
-                            console.log('\n========================================');
-                            console.log('⏳ GROUP COOLDOWN ACTIVE');
-                            console.log('========================================');
-                            console.log(`Group: ${groupName}`);
-                            console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
-                            console.log(`Time remaining: ${remainingMinutes} minutes`);
-                            console.log(`Next message allowed at: ${new Date(lastMessageTime + GROUP_COOLDOWN).toLocaleString()}`);
-                            console.log('========================================\n');
-                            continue;
-                        }
-
-                        // Basic lead pattern check
-                        const isLead = checkForLeadPatterns(messageContent);
-
-                        if (isLead) {
-                            console.log('\n========================================');
-                            console.log('🎯 NEW LEAD DETECTED');
-                            console.log('========================================');
-                            console.log(`Group: ${groupName}`);
-                            console.log(`Message: ${messageContent}`);
-                            console.log('========================================');
-                            
-                            // Update cooldown timer and save it
-                            const currentTime = Date.now();
-                            groupLastMessageTime.set(message.key.remoteJid, currentTime);
-                            saveGroupCooldowns(groupLastMessageTime);
-                            console.log(`✅ Cooldown timer set for ${groupName}`);
-                            console.log(`Next message allowed at: ${new Date(currentTime + GROUP_COOLDOWN).toLocaleString()}`);
-                            
-                            // Send notifications
-                            await vibrateForLead({ isLead: true });
-                            await playSoundNotification({ isLead: true });
-
-                            // Send "Checking" message
-                            console.log('\n========================================');
-                            console.log('📤 SENDING "CHECKING TEAM" MESSAGE');
-                            console.log('========================================');
-                            try {
-                                await sock.sendMessage(message.key.remoteJid, { text: "Checking team" });
-                                console.log('✅ Message sent successfully');
-                            } catch (error) {
-                                console.log('❌ Failed to send message:', error.message);
-                            }
-                            console.log('========================================\n');
-                        }
-                    } catch (error) {
-                        console.log('\n========================================');
-                        console.log('❌ ERROR PROCESSING GROUP MESSAGE');
-                        console.log('========================================');
-                        console.log(`Error: ${error.message}`);
-                        console.log('========================================\n');
-                    }
-                } else if (sender === SISTER_NUMBER) {
-                    // Handle direct messages from sister's number
-                    console.log('\n========================================');
-                    console.log('📱 SISTER\'S MESSAGE RECEIVED');
-                    console.log('========================================');
-                    console.log(`💬 Content: ${messageContent}`);
-                    
-                    // Check sister's cooldown
-                    const lastMessageTime = sisterLastMessageTime.get(SISTER_NUMBER) || 0;
-                    const timeSinceLastMessage = Date.now() - lastMessageTime;
-                    
-                    console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
-                    console.log(`Time since last message: ${Math.floor(timeSinceLastMessage / 60000)} minutes`);
-                    console.log(`Cooldown period: ${GROUP_COOLDOWN / 60000} minutes`);
-                    console.log('========================================\n');
-
-                    // Basic lead pattern check
-                    const isLead = checkForLeadPatterns(messageContent);
-
-                    if (isLead) {
-                        if (timeSinceLastMessage < GROUP_COOLDOWN) {
-                            // During cooldown, just alert without replying
-                            const remainingMinutes = Math.ceil((GROUP_COOLDOWN - timeSinceLastMessage) / 60000);
-                            console.log('\n========================================');
-                            console.log('⚠️ POTENTIAL LEAD DURING COOLDOWN');
-                            console.log('========================================');
-                            console.log(`Message: ${messageContent}`);
-                            console.log(`Last message time: ${new Date(lastMessageTime).toLocaleString()}`);
-                            console.log(`Time remaining: ${remainingMinutes} minutes`);
-                            console.log(`Next message allowed at: ${new Date(lastMessageTime + GROUP_COOLDOWN).toLocaleString()}`);
-                            console.log('========================================\n');
-                            
-                            // Send alert notifications
-                            await vibrateForLead({ isLead: true });
-                            await playSoundNotification({ isLead: true });
-                        } else {
-                            // Not in cooldown, proceed normally
-                            console.log('\n========================================');
-                            console.log('🎯 NEW LEAD FROM SISTER');
-                            console.log('========================================');
-                            console.log(`Message: ${messageContent}`);
-                            console.log('========================================');
-                            
-                            // Update sister's cooldown timer
-                            const currentTime = Date.now();
-                            sisterLastMessageTime.set(SISTER_NUMBER, currentTime);
-                            console.log(`✅ Cooldown timer set for sister`);
-                            console.log(`Next message allowed at: ${new Date(currentTime + GROUP_COOLDOWN).toLocaleString()}`);
-                            
-                            // Send notifications
-                            await vibrateForLead({ isLead: true });
-                            await playSoundNotification({ isLead: true });
-
-                            // Send "Checking" message to sister
-                            console.log('\n========================================');
-                            console.log('📤 SENDING "CHECKING TEAM" TO SISTER');
-                            console.log('========================================');
-                            try {
-                                await sock.sendMessage(SISTER_NUMBER, { text: "Checking team" });
-                                console.log('✅ Message sent successfully to sister');
-                            } catch (error) {
-                                console.log('❌ Failed to send message to sister:', error.message);
-                            }
-                            console.log('========================================\n');
-                        }
-                    } else {
-                        console.log('ℹ️ Not a lead, skipping');
-                    }
-                }
-            }
-        } catch (error) {
-            console.log('\n========================================');
-            console.log('❌ ERROR PROCESSING MESSAGES');
-            console.log('========================================');
-            console.log(`Error: ${error.message}`);
-            console.log('========================================\n');
-        } finally {
-            isProcessingMessage = false;
-        }
-    });
-
-    return sock;
 }
+
+// Start the bot
+startWhatsAppBot();
 
 // Optimize lead response handling
 async function handleLeadResponse(sock, message) {
@@ -2142,58 +1891,3 @@ async function handleLeadResponse(sock, message) {
         }
     }
 }
-
-// Simple function to check for lead patterns
-function checkForLeadPatterns(text) {
-    if (!text) return false;
-    
-    const patterns = {
-        // Customer Identifiers
-        name: /(?:name|patient|customer|cx|pt\s*name)[\s:]+([a-zA-Z\s\.]+)/i,
-        
-        // Contact Information
-        phone: /(?:phone|contact|number|mobile\s*number|ph\.?\s*no)[\s:]*(\d{10})/i,
-        
-        // Email and Other Identifiers
-        email: /(?:email|mail\s*id)[\s:]*([\w\.-]+@[\w\.-]+\.\w+)/i,
-        
-        // Loan and Plan Details
-        amount: /(?:loan\s*amount|amount|plan|scheme|tenure)[\s:]*(\d+(?:\.\d{2})?)[k]?/i,
-        
-        // Customer Status
-        status: /(?:existing\s*customer|new\s*customer)/i,
-        
-        // Location and Service Context
-        location: /(?:branch|clinic|area)[\s:]*([a-zA-Z\s]+)/i,
-        
-        // Additional Context
-        context: /(?:details|lead\s*is\s*from|please\s*check|kindly\s*check|eligibility\s*check)/i,
-
-        // Numbers that might be amounts
-        potentialAmount: /\b\d{4,6}\b/,
-        
-        // Time periods
-        timePeriod: /\b\d+\s*(?:months?|years?|days?)\b/i,
-
-        // Common lead-related words
-        leadWords: /(?:lead|case|patient|customer|client|enquiry|query|details|information)/i
-    };
-
-    // Check for essential lead components
-    const hasContactInfo = patterns.name.test(text) || patterns.phone.test(text) || patterns.email.test(text);
-    const hasFinancialInfo = patterns.amount.test(text) || patterns.potentialAmount.test(text);
-    const hasLocationInfo = patterns.location.test(text);
-    const hasContext = patterns.context.test(text);
-    const hasStatus = patterns.status.test(text);
-    const hasTimePeriod = patterns.timePeriod.test(text);
-    const hasLeadWords = patterns.leadWords.test(text);
-
-    // A message is considered a lead if it has any of these:
-    return hasContactInfo || hasFinancialInfo || hasLocationInfo || hasContext || hasStatus || hasTimePeriod || hasLeadWords;
-}
-
-// Start the bot
-startWhatsAppBot().then((sock) => {
-    // Start the test menu in parallel (non-blocking)
-    setTimeout(() => startTestMenu(sock), 2000);
-});
