@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# WhatsApp Bot Global Command
+# This script can be run from anywhere to start the bot
+
+# Find the bot directory
+BOT_DIR=""
+
+# Check common locations
+if [ -f "$HOME/whatsapp-bot/bot.js" ]; then
+    BOT_DIR="$HOME/whatsapp-bot"
+elif [ -f "$HOME/Downloads/whatsapp-bot/bot.js" ]; then
+    BOT_DIR="$HOME/Downloads/whatsapp-bot"
+elif [ -f "/storage/emulated/0/Download/whatsapp-bot/bot.js" ]; then
+    BOT_DIR="/storage/emulated/0/Download/whatsapp-bot"
+elif [ -f "/storage/emulated/0/Downloads/whatsapp-bot/bot.js" ]; then
+    BOT_DIR="/storage/emulated/0/Downloads/whatsapp-bot"
+elif [ -f "./bot.js" ]; then
+    BOT_DIR="$(pwd)"
+else
+    echo "❌ WhatsApp bot not found!"
+    echo ""
+    echo "Please clone the repository first:"
+    echo "git clone https://github.com/vinod-codes/whatsapp.git"
+    echo ""
+    echo "Or navigate to the bot directory and run:"
+    echo "node bot.js"
+    echo ""
+    exit 1
+fi
+
+# Navigate to bot directory
+cd "$BOT_DIR"
+
+echo "=========================================="
+echo "    WhatsApp Bot - Lead Management"
+echo "=========================================="
+echo "📍 Bot location: $BOT_DIR"
+echo ""
+
+# Check if Node.js is installed
+if ! command -v node &> /dev/null; then
+    echo "❌ Error: Node.js is not installed!"
+    echo "Please install Node.js first:"
+    echo "pkg install nodejs"
+    echo ""
+    exit 1
+fi
+
+# Check if dependencies are installed
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing dependencies..."
+    npm install
+    echo ""
+fi
+
+echo "🚀 Starting WhatsApp Bot..."
+echo "📱 Scan the QR code when it appears"
+echo ""
+
+# Start the bot
+node bot.js 

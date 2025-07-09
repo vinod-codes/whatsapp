@@ -1,116 +1,163 @@
-# WhatsApp Lead Monitor Bot
+# WhatsApp Bot - Lead Management
 
-A WhatsApp bot for monitoring and managing leads in Bajaj Finance groups.
+A powerful WhatsApp automation bot for lead management, built with Baileys and Node.js.
 
-## Repository
-https://github.com/vinod-codes/whatsapp-bot.git
+## 🚀 Quick Start
 
-## Features
-- Monitors all Bajaj Finance groups automatically
-- Detects leads in messages
-- Sends professional greetings
-- Tracks lead statistics
-- Vibrates phone for new leads (Android only)
-- Sends alerts to admin
+### For Termux (Android):
 
-## Setup Instructions for Android
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/vinod-codes/whatsapp.git
+   cd whatsapp
+   ```
 
-### Prerequisites
-1. Install Termux from F-Droid
-2. Basic understanding of command line
+2. **Run setup script:**
+   ```bash
+   chmod +x setup-termux.sh
+   ./setup-termux.sh
+   ```
 
-### Installation Steps
+3. **Start the bot:**
+   ```bash
+   ./start-bot.sh
+   ```
+   OR
+   ```bash
+   npm start
+   ```
+   OR
+   ```bash
+   npm run menu
+   ```
 
-1. **Open Termux and update packages:**
+### For Windows:
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/vinod-codes/whatsapp.git
+   cd whatsapp
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Start the bot:**
+   ```bash
+   start-bot.bat
+   ```
+   OR
+   ```bash
+   npm start
+   ```
+
+## 📱 Easy Commands
+
+After setup, you can use these simple commands:
+
+### Termux:
 ```bash
-pkg update && pkg upgrade
+./start-bot.sh    # Start with checks
+npm start         # Quick start
+npm run menu      # Start bot
+npm run bot       # Alternative start
 ```
 
-2. **Install required packages:**
+### Windows:
 ```bash
-pkg install nodejs
-pkg install git
-pkg install termux-api
-pkg install termux-services
+start-bot.bat     # Start with checks
+npm start         # Quick start
+npm run menu      # Start bot
 ```
 
-3. **Setup storage permissions:**
-```bash
-termux-setup-storage
-```
+## 🔧 Features
 
-4. **Clone the repository:**
-```bash
-cd storage/downloads
-git clone https://github.com/vinod-codes/whatsapp-bot.git
-cd whatsapp-bot
-```
+- **📤 Mass Messaging:** Send messages to groups and contacts
+- **📇 Contact Management:** Add, remove, and manage contacts
+- **📝 Pre-written Messages:** Group and personal message templates
+- **🔍 Lead Detection:** AI-powered lead detection
+- **📊 Lead Management:** Track and manage leads
+- **🔄 Auto Responses:** Automatic responses to leads
+- **📱 QR Code Authentication:** Easy WhatsApp login
 
-5. **Install dependencies:**
-```bash
-npm install
-```
+## 📋 Menu Options
 
-### Running the Bot
+1. **📤 Mass Message to Groups** - Send messages to selected groups
+2. **📬 Message Saved Contacts** - Send messages to saved contacts
+3. **📁 View Saved Groups / Contacts** - View your saved lists
+4. **📝 Use Pre-written Messages** - Manage message templates
+5. **👥 Manage Groups** - Select groups for messaging
+6. **📇 Manage Contacts** - Add/remove contacts
+7. **🔐 Logout & Clear Session** - Clear WhatsApp session
+8. **❌ Exit** - Close the bot
 
-1. **Start the bot:**
-```bash
-node bot.js
-```
+## 📝 Message Types
 
-2. **Scan QR Code:**
-- When the QR code appears, scan it with WhatsApp
-- Open WhatsApp > Menu > Linked Devices > Link a Device
-- Scan the QR code shown in Termux
+### Group Messages (Respectful):
+- Professional tone with 🙏 and "Respected team"
+- Suitable for group communications
 
-3. **Bot Features:**
-- Automatically monitors all configured groups
-- Detects and responds to leads
-- Sends greetings to groups
-- Tracks lead statistics
+### Personal Messages (Simple):
+- Direct and simple communication
+- Suitable for individual contacts
 
-4. **To stop the bot:**
-- Press Ctrl+C in Termux
-- Or select option 4 (Exit) from the menu
+## 🔐 Authentication
 
-### Important Notes
-- Keep Termux running in the background
-- Don't close Termux while the bot is running
-- Make sure your phone doesn't go into deep sleep
-- Keep WhatsApp Web active
+1. Run the bot
+2. Scan the QR code with WhatsApp
+3. The bot will connect automatically
 
-### Troubleshooting
-1. If the bot stops responding:
-   - Check if Termux is still running
-   - Restart the bot using `node bot.js`
+## 📁 File Structure
 
-2. If QR code doesn't appear:
-   - Delete the `auth_info_baileys` folder
-   - Restart the bot
-
-3. If messages aren't being sent:
-   - Check your internet connection
-   - Make sure WhatsApp Web is active
-   - Restart the bot
-
-## Project Structure
 ```
 whatsapp-bot/
-├── bot.js              # Main bot code
-├── requirements.txt    # Dependencies
-├── start-bot.bat      # Windows start script
-└── README.md          # This file
+├── bot.js                 # Main bot file
+├── start-bot.sh          # Termux start script
+├── start-bot.bat         # Windows start script
+├── setup-termux.sh       # Termux setup script
+├── package.json          # Dependencies
+├── mass-groups.json      # Saved groups
+├── mass-contacts.json    # Saved contacts
+├── group-messages.json   # Group message templates
+├── personal-messages.json # Personal message templates
+└── state/               # Bot state files
 ```
 
-## Contributing
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+## 🛠️ Troubleshooting
 
-## Support
-For any issues or questions, please contact the developer.
+### Common Issues:
 
-## License
-MIT License
+1. **Node.js not found:**
+   ```bash
+   pkg install nodejs  # Termux
+   # Download from nodejs.org for Windows
+   ```
+
+2. **Dependencies not installed:**
+   ```bash
+   npm install
+   ```
+
+3. **Permission denied:**
+   ```bash
+   chmod +x start-bot.sh
+   chmod +x setup-termux.sh
+   ```
+
+4. **QR code not showing:**
+   - Restart the bot
+   - Clear auth folder: `rm -rf auth_info_baileys`
+
+## 📞 Support
+
+For issues or questions, please check the GitHub repository or create an issue.
+
+## 📄 License
+
+This project is licensed under the ISC License.
+
+---
+
+**Made with ❤️ for WhatsApp automation**

@@ -1,42 +1,48 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/bin/bash
 
-# WhatsApp Auto-Messenger Bot - Termux Setup Script
-# This script helps set up the environment in Termux for running the bot
+# WhatsApp Bot Setup Script for Termux
+# This script sets up everything needed to run the bot
 
-echo "Setting up WhatsApp Auto-Messenger Bot in Termux..."
+echo "=========================================="
+echo "    WhatsApp Bot Setup for Termux"
+echo "=========================================="
+echo ""
 
-# Update Termux packages
-echo "Updating Termux packages..."
-pkg update -y && pkg upgrade -y
+# Update package list
+echo "📦 Updating package list..."
+pkg update -y
 
-# Install required packages
-echo "Installing required packages..."
-pkg install -y nodejs
-pkg install -y termux-api
+# Install Node.js if not installed
+if ! command -v node &> /dev/null; then
+    echo "📦 Installing Node.js..."
+    pkg install nodejs -y
+else
+    echo "✅ Node.js is already installed"
+fi
 
-# Set up storage access
-echo "Setting up storage access..."
-termux-setup-storage
+# Install Git if not installed
+if ! command -v git &> /dev/null; then
+    echo "📦 Installing Git..."
+    pkg install git -y
+else
+    echo "✅ Git is already installed"
+fi
 
-# Set timezone to IST
-echo "Setting timezone to IST..."
-pkg install -y tzdata
-export TZ='Asia/Kolkata'
-echo "export TZ='Asia/Kolkata'" >> ~/.bashrc
+# Make the start script executable
+chmod +x start-bot.sh
 
-# Install PM2 for process management
-echo "Installing PM2..."
-npm install -g pm2
-
-# Install dependencies
-echo "Installing project dependencies..."
+# Install npm dependencies
+echo "📦 Installing npm dependencies..."
 npm install
 
-# Create log directories
-echo "Creating log directories..."
-mkdir -p logs
-
-echo "Setup complete!"
-echo "To start the bot, run: node bot.js"
-echo "To run in background with PM2, run: pm2 start bot.js --name whatsapp-bot"
-echo "To view logs, run: pm2 logs whatsapp-bot"
+echo ""
+echo "✅ Setup complete!"
+echo ""
+echo "🚀 To start the bot, run one of these commands:"
+echo "   ./start-bot.sh"
+echo "   npm start"
+echo "   npm run menu"
+echo "   node bot.js"
+echo ""
+echo "📱 The bot will show a QR code to scan with WhatsApp"
+echo ""

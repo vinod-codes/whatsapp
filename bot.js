@@ -2251,15 +2251,36 @@ async function pickMessage(prewrittenOnly = false) {
             return msg;
         }
     }
+    
+    // Ask whether to use group or personal messages
+    const { messageType } = await prompt([
+        {
+            type: 'rawlist',
+            name: 'messageType',
+            message: 'Select message type:',
+            choices: [
+                { name: '📢 Group Messages (Respectful)', value: 'group' },
+                { name: '👤 Personal Messages (Simple)', value: 'personal' }
+            ]
+        }
+    ]);
+    
+    let messages;
+    if (messageType === 'group') {
+        messages = loadGroupMessages();
+    } else {
+        messages = loadPersonalMessages();
+    }
+    
     const { msgIdx } = await prompt([
         {
             type: 'rawlist',
             name: 'msgIdx',
-            message: 'Select a pre-written message:',
-            choices: prewrittenMessages.map((m, i) => ({ name: m.title, value: i }))
+            message: `Select a ${messageType === 'group' ? 'group' : 'personal'} message:`,
+            choices: messages.map((m, i) => ({ name: m.title, value: i }))
         }
     ]);
-    let msg = prewrittenMessages[msgIdx].text;
+    let msg = messages[msgIdx].text;
     if (Array.isArray(msg)) {
         const { shortIdx } = await prompt([
             {
@@ -2316,14 +2337,34 @@ const personalMotivationalMessages = [
 
 const PREWRITTEN_MESSAGES_FILE = './prewritten-messages.json';
 
-// Default pre-written messages
+// Default pre-written messages for groups (respectful)
+const groupMessages = [
+    { key: 'morning', title: '🌅 Morning Message', group: 'Daily Greetings', text: 'Good morning team! 🙏 Hope everyone is doing well. Please share any eligible Bajaj EMI leads when you get a chance. Your efforts are truly appreciated. Thank you! 🙏' },
+    { key: 'afternoon', title: '🌞 Afternoon Message', group: 'Daily Greetings', text: 'Good afternoon everyone! 🙏 Just a gentle reminder - if you have any Bajaj EMI leads, please share them when convenient. Thank you for your continued support! 🙏' },
+    { key: 'evening', title: '🌙 Evening Message', group: 'Daily Greetings', text: 'Good evening team! 🙏 As we wrap up the day, please share any pending Bajaj EMI leads if you have any. Thank you for your hard work today! 🙏' },
+    { key: 'monthend', title: '📈 Month-End Push', group: 'Special Timings', text: 'Respected team, 🙏 we\'re approaching month-end. If you have any eligible Bajaj EMI leads, please share them. Your contribution is valuable to our success. Thank you! 🙏' },
+    { key: 'followup', title: '🔁 Daily Follow-up Reminder', group: 'Special Timings', text: 'Hello respected team! 🙏 Just a friendly reminder to check for any Bajaj EMI opportunities with your customers today. Your support means a lot to us. Thank you! 🙏' },
+    { key: 'eod', title: '🕒 End-of-Day Lead Push', group: 'Special Timings', text: 'Respected team, 🙏 if you have any leads from today, please share them before we close. Your efforts are truly appreciated. Thank you for your dedication! 🙏' }
+];
+
+// Personal contact messages (simpler)
+const personalMessages = [
+    { key: 'morning', title: '🌅 Morning Message', group: 'Daily Greetings', text: 'Good morning. Please check if there are any Bajaj EMI leads today and share when possible.' },
+    { key: 'afternoon', title: '🌞 Afternoon Message', group: 'Daily Greetings', text: 'Hope your day is going well. Let me know if any Bajaj EMI leads are available.' },
+    { key: 'evening', title: '🌙 Evening Message', group: 'Daily Greetings', text: 'Before closing the day, kindly share any Bajaj EMI leads if available.' },
+    { key: 'monthend', title: '📈 Month-End Push', group: 'Special Timings', text: 'We\'re close to month-end. Please check and update any pending Bajaj EMI leads.' },
+    { key: 'followup', title: '🔁 Daily Follow-up Reminder', group: 'Special Timings', text: 'Just a quick reminder to include Bajaj EMI in your customer discussions today.' },
+    { key: 'eod', title: '🕒 End-of-Day Lead Push', group: 'Special Timings', text: 'If there are any leads noted today, please share them before end of day.' }
+];
+
+// Default pre-written messages (keeping for backward compatibility)
 const defaultPrewrittenMessages = [
-    { key: 'morning', title: '🌅 Morning Message', group: 'Daily Greetings', text: 'Good morning. Start checking for Bajaj EMI leads and share eligible ones during the day.' },
-    { key: 'afternoon', title: '🌞 Afternoon Message', group: 'Daily Greetings', text: 'Midday check-in. Continue pushing Bajaj EMI where applicable and update leads list.' },
-    { key: 'evening', title: '🌙 Evening Message', group: 'Daily Greetings', text: 'End-of-day reminder. Share any pending Bajaj EMI leads before closing.' },
-    { key: 'monthend', title: '📈 Month-End Push', group: 'Special Timings', text: 'We\'re in the final stretch of the month. Push all eligible Bajaj EMI leads today to close strong.' },
-    { key: 'followup', title: '🔁 Daily Follow-up Reminder', group: 'Special Timings', text: 'Reminder to ask every customer about Bajaj EMI today. Don\'t miss potential leads.' },
-    { key: 'eod', title: '🕒 End-of-Day Lead Push', group: 'Special Timings', text: 'Final update call — if you have any leads from today, share them now before we wrap.' }
+    { key: 'morning', title: '🌅 Morning Message', group: 'Daily Greetings', text: 'Good morning team! 🙏 Hope everyone is doing well. Please share any eligible Bajaj EMI leads when you get a chance. Your efforts are truly appreciated. Thank you! 🙏' },
+    { key: 'afternoon', title: '🌞 Afternoon Message', group: 'Daily Greetings', text: 'Good afternoon everyone! 🙏 Just a gentle reminder - if you have any Bajaj EMI leads, please share them when convenient. Thank you for your continued support! 🙏' },
+    { key: 'evening', title: '🌙 Evening Message', group: 'Daily Greetings', text: 'Good evening team! 🙏 As we wrap up the day, please share any pending Bajaj EMI leads if you have any. Thank you for your hard work today! 🙏' },
+    { key: 'monthend', title: '📈 Month-End Push', group: 'Special Timings', text: 'Respected team, 🙏 we\'re approaching month-end. If you have any eligible Bajaj EMI leads, please share them. Your contribution is valuable to our success. Thank you! 🙏' },
+    { key: 'followup', title: '🔁 Daily Follow-up Reminder', group: 'Special Timings', text: 'Hello respected team! 🙏 Just a friendly reminder to check for any Bajaj EMI opportunities with your customers today. Your support means a lot to us. Thank you! 🙏' },
+    { key: 'eod', title: '🕒 End-of-Day Lead Push', group: 'Special Timings', text: 'Respected team, 🙏 if you have any leads from today, please share them before we close. Your efforts are truly appreciated. Thank you for your dedication! 🙏' }
 ];
 
 function loadPrewrittenMessages() {
@@ -2336,8 +2377,36 @@ function loadPrewrittenMessages() {
     return [...defaultPrewrittenMessages];
 }
 
+function loadGroupMessages() {
+    if (fs.existsSync('./group-messages.json')) {
+        try {
+            const arr = JSON.parse(fs.readFileSync('./group-messages.json', 'utf-8'));
+            if (Array.isArray(arr)) return arr;
+        } catch (e) {}
+    }
+    return [...groupMessages];
+}
+
+function loadPersonalMessages() {
+    if (fs.existsSync('./personal-messages.json')) {
+        try {
+            const arr = JSON.parse(fs.readFileSync('./personal-messages.json', 'utf-8'));
+            if (Array.isArray(arr)) return arr;
+        } catch (e) {}
+    }
+    return [...personalMessages];
+}
+
 function savePrewrittenMessages(arr) {
     fs.writeFileSync(PREWRITTEN_MESSAGES_FILE, JSON.stringify(arr, null, 2));
+}
+
+function saveGroupMessages(arr) {
+    fs.writeFileSync('./group-messages.json', JSON.stringify(arr, null, 2));
+}
+
+function savePersonalMessages(arr) {
+    fs.writeFileSync('./personal-messages.json', JSON.stringify(arr, null, 2));
 }
 
 // Remove any previous declaration of prewrittenMessages above this point
@@ -2346,11 +2415,39 @@ let prewrittenMessages = loadPrewrittenMessages();
 // Pre-written Messages menu
 async function prewrittenMessagesMenu() {
     while (true) {
-        prewrittenMessages = loadPrewrittenMessages();
+        const { menuType } = await prompt([
+            {
+                type: 'rawlist',
+                name: 'menuType',
+                message: '════════════ PRE-WRITTEN MESSAGES ═══════════',
+                choices: [
+                    { name: '📢 Manage Group Messages', value: 'group' },
+                    { name: '👤 Manage Personal Messages', value: 'personal' },
+                    { name: '⬅️  Back to Main Menu', value: 'back' }
+                ]
+            }
+        ]);
+        
+        if (menuType === 'back') return;
+        
+        let messages;
+        let saveFunction;
+        let loadFunction;
+        
+        if (menuType === 'group') {
+            messages = loadGroupMessages();
+            saveFunction = saveGroupMessages;
+            loadFunction = loadGroupMessages;
+        } else {
+            messages = loadPersonalMessages();
+            saveFunction = savePersonalMessages;
+            loadFunction = loadPersonalMessages;
+        }
+        
         // Group messages for display
-        const daily = prewrittenMessages.filter(m => m.group === 'Daily Greetings');
-        const special = prewrittenMessages.filter(m => m.group === 'Special Timings');
-        const custom = prewrittenMessages.filter(m => !m.group);
+        const daily = messages.filter(m => m.group === 'Daily Greetings');
+        const special = messages.filter(m => m.group === 'Special Timings');
+        const custom = messages.filter(m => !m.group);
         const choices = [
             new inquirer.Separator('📅 Daily Greetings:'),
             ...daily.map((m, i) => ({ name: `${i + 1}. ${m.title}`, value: m.key })),
@@ -2364,29 +2461,31 @@ async function prewrittenMessagesMenu() {
         choices.push(new inquirer.Separator('\n🛠 Manage Templates:'));
         choices.push({ name: '➕ Add New Message', value: 'add' });
         choices.push({ name: '🗑️  Delete a Message', value: 'delete' });
-        choices.push({ name: '⬅️  Back to Main Menu', value: 'back' });
+        choices.push({ name: '⬅️  Back to Message Types', value: 'back' });
+        
         const { action } = await prompt([
             {
                 type: 'rawlist',
                 name: 'action',
-                message: '════════════ PRE-WRITTEN MESSAGES ═══════════',
+                message: `════════════ ${menuType.toUpperCase()} MESSAGES ═══════════`,
                 choices
             }
         ]);
-        if (action === 'back') return;
+        
+        if (action === 'back') continue;
         if (action === 'add') {
             const { title, text } = await prompt([
                 { type: 'input', name: 'title', message: 'Enter a title for the new message:' },
                 { type: 'input', name: 'text', message: 'Enter the message content:' }
             ]);
             const key = `custom_${Date.now()}`;
-            prewrittenMessages.push({ key, title, text });
-            savePrewrittenMessages(prewrittenMessages);
+            messages.push({ key, title, text });
+            saveFunction(messages);
             console.log('✅ Message added.');
             continue;
         }
         if (action === 'delete') {
-            if (!prewrittenMessages.length) {
+            if (!messages.length) {
                 console.log('No messages to delete.');
                 continue;
             }
@@ -2395,16 +2494,16 @@ async function prewrittenMessagesMenu() {
                     type: 'checkbox',
                     name: 'toDelete',
                     message: 'Select messages to delete:',
-                    choices: prewrittenMessages.map(m => ({ name: m.title, value: m.key }))
+                    choices: messages.map(m => ({ name: m.title, value: m.key }))
                 }
             ]);
-            prewrittenMessages = prewrittenMessages.filter(m => !toDelete.includes(m.key));
-            savePrewrittenMessages(prewrittenMessages);
+            messages = messages.filter(m => !toDelete.includes(m.key));
+            saveFunction(messages);
             console.log('✅ Selected messages deleted.');
             continue;
         }
         // Show message content
-        const msg = prewrittenMessages.find(m => m.key === action);
+        const msg = messages.find(m => m.key === action);
         if (msg) {
             console.log(`\n📋 Message Content:\n${msg.text}\n`);
             await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);

@@ -5,6 +5,9 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
+    "menu": "node bot.js",
+    "bot": "node bot.js",
+    "run": "node bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
