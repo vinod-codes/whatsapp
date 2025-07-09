@@ -5,6 +5,8 @@ const { Boom } = require('@hapi/boom');
 const fs = require('fs');
 const path = require('path');
 const qrcode = require('qrcode-terminal');
+const inquirer = require('inquirer');
+const prompt = inquirer.createPromptModule();
 
 // Add cooldown constants and functions
 const GROUP_COOLDOWN = 30 * 60 * 1000; // 30 minutes in milliseconds
@@ -977,6 +979,7 @@ class TerminalUI {
     }
 
     clearScreen() {
+        // Works on most terminals (Windows, Linux, macOS)
         process.stdout.write('\x1Bc');
     }
 
@@ -1140,35 +1143,6 @@ let isSendingResponse = false;
 // Maximum number of greeting messages to send per day in each group
 // This only applies to greeting messages, not "Checking" messages
 const MAX_GREETINGS_PER_DAY_IN_GROUP = 2;
-
-// Updated: Full list of groups to monitor
-const groupsToMonitor = [
-  "Bajaj-LC Group Bangalore",
-  "Bajaj + Dr Agarwal rajaji nagar",
-  "Partha+Bajaj Bangalore",
-  "Bajaj Fin and SleepMed",
-  "Bajaj+ Lakme Rajajinagar",
-  "Bajaj + Isha",
-  "Headz + Bajaj Finserv",
-  "Bajaj + Nethradama Rajajinagar",
-  "Bajaj-Rehamo",
-  "Lc Rok + bajaj",
-  "VASAN EYE CARE + BAJAJ FIN",
-  "Bajaj+ Hsn",
-  "Bajaj+ Priya hearing",
-  "Bajaj Baby sience",
-  "Bajaj + Ad gro (OZIVIT)",
-  "Bajaj+ Dr Shetty",
-  "Bajaj +Partha Dasarahalli",
-  "Vicc +bajaj rajaji nagar"
-];
-
-// Add special group rules
-const specialGroupRules = {
-    'Bajaj Finance+Smiles.ai': {
-        skipLocations: ['hyderabad', 'hyd', 'hitech city', 'gachibowli', 'secunderabad']
-    }
-};
 
 // Enhanced professional greetings with more options
 const professionalGreetings = {
@@ -1615,162 +1589,518 @@ function logLead(source, message, leadDetails) {
     }
 }
 
-// Function to get group ID from name
-async function getGroupId(sock, groupName) {
+// Function to fetch all WhatsApp groups and let user select for mass messaging
+async function selectAndSaveMassGroups(sock) {
     try {
-        // Get all groups the bot is part of
-        const groups = await sock.groupFetchAllParticipating();
-        
-        // Find the group that matches the name
-        for (const [id, group] of Object.entries(groups)) {
-            if (group.subject === groupName || group.subject.includes(groupName)) {
-                return id;
-            }
+        // Fetch all groups
+        const groupsObj = await sock.groupFetchAllParticipating();
+        const groups = Object.values(groupsObj).map(g => ({
+            name: g.subject,
+            jid: g.id
+        }));
+        if (!groups.length) {
+            console.log('❌ No groups found.');
+            return;
         }
-        return null;
-    } catch (error) {
-        console.error('Error getting group ID:', error);
-        return null;
+        // Show CLI menu
+        const choices = groups.map(g => ({ name: g.name, value: g }));
+        const answers = await prompt([
+            {
+                type: 'checkbox',
+                name: 'selectedGroups',
+                message: '✅ Select groups for mass messaging:',
+                choices
+            }
+        ]);
+        if (!answers.selectedGroups.length) {
+            console.log('❌ No groups selected.');
+            return;
+            }
+        // Save to file
+        const fs = require('fs');
+        fs.writeFileSync('./mass-groups.json', JSON.stringify(answers.selectedGroups, null, 2));
+        console.log('✅ Saved selected groups to mass-groups.json');
+    } catch (err) {
+        console.error('Error selecting/saving groups:', err);
     }
 }
 
-// === Main Control Menu ===
-function startGreetingMenu(sock) {
-    const readline = require('readline');
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-    const sisterNumber = '919686693567@s.whatsapp.net';
+// Helper to delete a file or folder recursively
+function deleteFolderRecursive(folderPath) {
+    if (fs.existsSync(folderPath)) {
+        fs.rmSync(folderPath, { recursive: true, force: true });
+        return true;
+    }
+    return false;
+}
 
-    function sendGreeting(target, type) {
-        let greeting;
-        switch(type) {
-            case '1': greeting = professionalGreetings.morning[0]; break;
-            case '2': greeting = professionalGreetings.afternoon[0]; break;
-            case '3': greeting = professionalGreetings.evening[0]; break;
-            case '4': greeting = professionalGreetings.weekend[0]; break;
-            case '5': greeting = professionalGreetings.monthEnd[0]; break;
-            default: greeting = professionalGreetings.morning[0]; break;
-        }
-        if (target === '1') {
-            // Send to sister
-            sock.sendMessage(sisterNumber, { text: greeting }).then(() => {
-                console.log('✅ Greeting sent to sister!');
-                showMenu();
-            });
-        } else if (target === '2') {
-            // Send to all groups
-            console.log('\nSending greetings to all groups...');
-            (async () => {
-                for (const group of groupsToMonitor) {
-                    try {
-                        const groupId = await getGroupId(sock, group);
-                        if (groupId) {
-                            await sock.sendMessage(groupId, { text: greeting });
-                            console.log(`✅ Greeting sent to: ${group}`);
-                        } else {
-                            console.log(`❌ Could not find group: ${group}`);
+// Helper to clear saved groups
+function clearSavedGroups() {
+    if (fs.existsSync('./mass-groups.json')) {
+        fs.unlinkSync('./mass-groups.json');
+        return true;
+    }
+    return false;
+}
+
+// Helper to clear saved contacts
+function clearSavedContacts() {
+    if (fs.existsSync('./mass-contacts.json')) {
+        fs.unlinkSync('./mass-contacts.json');
+        return true;
+    }
+    return false;
+}
+
+// Manage contacts for individual messaging
+async function manageContacts() {
+    let contacts = [];
+    if (fs.existsSync('./mass-contacts.json')) {
+        contacts = JSON.parse(fs.readFileSync('./mass-contacts.json', 'utf-8'));
+    }
+    let done = false;
+    while (!done) {
+        const { action } = await prompt([
+            {
+                type: 'rawlist',
+                name: 'action',
+                message: 'Manage Contacts:',
+                choices: [
+                    { name: 'Add Contact(s)', value: 'add' },
+                    { name: 'Remove Contact', value: 'remove' },
+                    { name: 'View Contacts', value: 'view' },
+                    { name: 'Clear All Contacts', value: 'clear' },
+                    { name: 'Back to Main Menu', value: 'back' }
+                ]
+            }
+        ]);
+        if (action === 'add') {
+            const { addType } = await prompt([
+                {
+                    type: 'rawlist',
+                    name: 'addType',
+                    message: 'How would you like to add contacts?',
+                    choices: [
+                        { name: 'Add Single Contact', value: 'single' },
+                        { name: 'Add Multiple Contacts', value: 'multiple' },
+                        { name: 'Back to Contacts Menu', value: 'back' }
+                    ]
+                }
+            ]);
+            
+            if (addType === 'back') continue;
+            
+            if (addType === 'single') {
+                const { name, number } = await prompt([
+                    { 
+                        type: 'input', 
+                        name: 'name', 
+                        message: 'Enter contact name:',
+                        validate: (input) => input.trim() ? true : 'Name is required'
+                    },
+                    { 
+                        type: 'input', 
+                        name: 'number', 
+                        message: 'Enter phone number (without country code):',
+                        validate: (input) => {
+                            const cleanNumber = input.replace(/\D/g, '');
+                            if (!cleanNumber) return 'Number is required';
+                            if (cleanNumber.length < 10) return 'Number must be at least 10 digits';
+                            if (cleanNumber.length > 10) return 'Number should be 10 digits (without country code)';
+                            return true;
                         }
-                    } catch (e) {
-                        console.log(`❌ Failed to send to ${group}: ${e.message}`);
+                    }
+                ]);
+                
+                const cleanNumber = number.replace(/\D/g, '');
+                const fullNumber = `91${cleanNumber}`;
+                
+                // Check if contact already exists
+                const existingContact = contacts.find(c => c.number === fullNumber);
+                if (existingContact) {
+                    console.log(`⚠️ Contact with number ${fullNumber} already exists (${existingContact.name})`);
+                    const { overwrite } = await prompt([
+                        {
+                            type: 'confirm',
+                            name: 'overwrite',
+                            message: 'Do you want to update the existing contact?',
+                            default: false
+                        }
+                    ]);
+                    if (overwrite) {
+                        const index = contacts.findIndex(c => c.number === fullNumber);
+                        contacts[index] = { name: name.trim(), number: fullNumber };
+                        console.log('✅ Contact updated successfully.');
+                    }
+                } else {
+                    contacts.push({ name: name.trim(), number: fullNumber });
+                    console.log(`✅ Contact added: ${name.trim()} (${fullNumber})`);
+                }
+                
+                fs.writeFileSync('./mass-contacts.json', JSON.stringify(contacts, null, 2));
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
+                
+            } else if (addType === 'multiple') {
+                const { bulk } = await prompt([
+                    { 
+                        type: 'editor', 
+                        name: 'bulk', 
+                        message: 'Enter contacts (one per line, format: Name,Number without country code):\nExample:\nJohn Doe,9876543210\nJane Smith,9876543211'
+                    }
+                ]);
+                
+                const lines = bulk.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                let added = 0;
+                let skipped = 0;
+                
+                for (const line of lines) {
+                    const parts = line.split(',');
+                    if (parts.length === 2) {
+                        const name = parts[0].trim();
+                        const number = parts[1].replace(/\D/g, '');
+                        
+                        if (name && number.length === 10) {
+                            const fullNumber = `91${number}`;
+                            
+                            // Check if contact already exists
+                            const existingContact = contacts.find(c => c.number === fullNumber);
+                            if (existingContact) {
+                                console.log(`⚠️ Skipped: ${name} (${fullNumber}) - already exists as ${existingContact.name}`);
+                                skipped++;
+                            } else {
+                                contacts.push({ name, number: fullNumber });
+                                added++;
+                            }
+                        } else {
+                            console.log(`⚠️ Skipped invalid line: ${line}`);
+                            skipped++;
+                        }
+                    } else {
+                        console.log(`⚠️ Skipped invalid format: ${line}`);
+                        skipped++;
                     }
                 }
-                console.log('\n✅ Greeting distribution completed!');
-                showMenu();
-            })();
+                
+                fs.writeFileSync('./mass-contacts.json', JSON.stringify(contacts, null, 2));
+                console.log(`✅ Added ${added} contact(s), skipped ${skipped} contact(s).`);
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
+            }
+        } else if (action === 'remove') {
+            if (!contacts.length) {
+                console.log('No contacts to remove.');
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
+                continue;
+            }
+            const { toRemove } = await prompt([
+                {
+                    type: 'checkbox',
+                    name: 'toRemove',
+                    message: 'Select contacts to remove:',
+                    choices: contacts.map((c, i) => ({ name: `${c.name} (${c.number})`, value: i }))
+                }
+            ]);
+            contacts = contacts.filter((_, i) => !toRemove.includes(i));
+            fs.writeFileSync('./mass-contacts.json', JSON.stringify(contacts, null, 2));
+            console.log('✅ Selected contacts removed.');
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
+        } else if (action === 'view') {
+            if (!contacts.length) {
+                console.log('No contacts saved.');
+            } else {
+                console.log('\n📇 Saved Contacts:');
+                console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                contacts.forEach((c, i) => {
+                    console.log(`${i + 1}. ${c.name}`);
+                    console.log(`   📱 ${c.number}`);
+                    console.log('');
+                });
+                console.log(`Total: ${contacts.length} contact(s)`);
+                await pauseIfNeeded(contacts.length);
+            }
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
+        } else if (action === 'clear') {
+            const { confirm } = await prompt([
+                {
+                    type: 'confirm',
+                    name: 'confirm',
+                    message: 'Are you sure you want to clear all contacts?',
+                    default: false
+                }
+            ]);
+            if (confirm) {
+                clearSavedContacts();
+                contacts = [];
+                console.log('✅ All contacts cleared.');
+            } else {
+                console.log('❌ Operation cancelled.');
+            }
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
+        } else if (action === 'back') {
+            done = true;
         }
     }
+}
 
-    function showMenu() {
-        console.log('\n========================================');
-        console.log('            SEND GREETINGS              ');
-        console.log('========================================');
-        console.log('1. Send to Sister');
-        console.log('2. Send to All Groups');
-        console.log('3. Test All Groups (Dry Run)');
-        console.log('4. Logout from Device');
-        console.log('5. Back to Main Menu');
-        console.log('========================================');
+// Add a helper to pause after long output
+async function pauseIfNeeded(lines) {
+    if (lines > 15) {
+        await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to continue...' }]);
+    }
+}
 
-        rl.question('\nSelect target: ', async (target) => {
-            if (target === '5') {
-                showMenu(); // Or go to main menu if you have one
-                return;
+// Add a robust clearScreen helper at the top
+function clearScreen() {
+    // Works on most terminals (Windows, Linux, macOS)
+    process.stdout.write('\x1Bc');
+        }
+
+// Main menu using inquirer
+async function mainMenu(sock) {
+    while (true) {
+        clearScreen();
+        const { option } = await prompt([
+            {
+                type: 'rawlist',
+                name: 'option',
+                message: 'Select an option:',
+                choices: [
+                    { name: '📤 Mass Message to Groups', value: 'massGroups' },
+                    { name: '📬 Message Saved Contacts', value: 'massContacts' },
+                    { name: '📁 View Saved Groups / Contacts', value: 'viewSaved' },
+                    { name: '📝 Use Pre-written Messages', value: 'prewritten' },
+                    { name: '👥 Manage Groups', value: 'manageGroups' },
+                    { name: '📇 Manage Contacts', value: 'manageContacts' },
+                    { name: '🔐 Logout & Clear WhatsApp Session', value: 'logout' },
+                    { name: '❌ Exit', value: 'exit' }
+                ]
             }
-            if (target === '4') {
-                // Logout: delete auth_info_baileys folder and exit
-                const fs = require('fs');
-                const path = require('path');
+        ]);
+        if (option === 'exit') {
+            console.log('👋 Exiting. Goodbye!');
+            process.exit(0);
+        } else if (option === 'logout') {
                 const authDir = path.join(__dirname, 'auth_info_baileys');
-                if (fs.existsSync(authDir)) {
-                    fs.rmSync(authDir, { recursive: true, force: true });
-                    console.log('\n✅ Logged out! Auth info deleted. Please restart the bot to scan a new QR code.');
+            if (deleteFolderRecursive(authDir)) {
+                console.log('✅ Auth info deleted. Please restart the bot to scan a new QR code.');
                 } else {
-                    console.log('\nAuth info folder not found. Already logged out or never logged in.');
+                console.log('Auth info folder not found. Already logged out or never logged in.');
                 }
-                rl.close();
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to exit...' }]);
                 process.exit(0);
-                return;
-            }
-            if (target === '3') {
-                // Dry run test: check group accessibility, do not send messages
-                const failedGroups = [];
-                console.log('\n========================================');
-                console.log('      DRY RUN: TESTING ALL GROUPS       ');
-                console.log('========================================');
-                for (const group of groupsToMonitor) {
-                    try {
-                        const groupId = await getGroupId(sock, group);
-                        if (groupId) {
-                            console.log(`✅ Group accessible: ${group}`);
+        } else if (option === 'massGroups') {
+            clearScreen();
+            const { sub } = await prompt([
+                {
+                    type: 'rawlist',
+                    name: 'sub',
+                    message: 'Mass Message to Groups:',
+                    choices: [
+                        { name: '📄  Choose Pre-written Message', value: 'pre' },
+                        { name: '✍️   Type Custom Message', value: 'manual' },
+                        { name: '📂  View Selected Groups', value: 'view' },
+                        { name: '🧹  Clear Group Selection', value: 'clear' },
+                        { name: '⬅️   Back to Main Menu', value: 'back' }
+                    ]
+                }
+            ]);
+            if (sub === 'back') continue;
+            if (sub === 'view') {
+                try {
+                    const groupList = JSON.parse(fs.readFileSync('./mass-groups.json', 'utf-8'));
+                    if (!groupList.length) {
+                        console.log('❌ No groups saved.');
                         } else {
-                            console.log(`❌ Could not find group: ${group}`);
-                            failedGroups.push(group);
+                        groupList.forEach(g => console.log(`- ${g.name}`));
+                        await pauseIfNeeded(groupList.length);
                         }
                     } catch (e) {
-                        console.log(`❌ Error checking group ${group}: ${e.message}`);
-                        failedGroups.push(group);
-                    }
-                    // Add delay to avoid rate limiting
-                    await new Promise(res => setTimeout(res, 700));
+                    console.log('❌ No groups saved.');
                 }
-                if (failedGroups.length > 0) {
-                    console.log('\n❌ The following groups are NOT accessible (name mismatch or not a member):');
-                    failedGroups.forEach(g => console.log(`- ${g}`));
-                } else {
-                    console.log('\n✅ All groups are accessible!');
-                }
-                showMenu();
-                return;
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+                continue;
+            } else if (sub === 'clear') {
+                clearSavedGroups();
+                console.log('✅ Group selection cleared.');
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+                continue;
             }
-
-            console.log('\n========================================');
-            console.log('            GREETING TYPES              ');
-            console.log('========================================');
-            console.log('1. Morning Greeting');
-            console.log('2. Afternoon Greeting');
-            console.log('3. Evening Greeting');
-            console.log('4. Weekend Greeting');
-            console.log('5. Month-End Greeting');
-            console.log('6. Back to Previous Menu');
-            console.log('========================================');
-
-            rl.question('\nSelect greeting type: ', async (type) => {
-                if (type === '6') {
-                    showMenu(); // Go back to greeting target menu
-                    return;
+            let msg = '';
+            if (sub === 'pre') {
+                msg = await pickMessage(true);
+            } else if (sub === 'manual') {
+                const { m } = await prompt([{ type: 'input', name: 'm', message: 'Enter your message:' }]);
+                msg = m;
+            }
+            let groupList = [];
+            try {
+                groupList = JSON.parse(fs.readFileSync('./mass-groups.json', 'utf-8'));
+            } catch (e) {}
+            if (!groupList.length) {
+                console.log('❌ No groups selected yet. Please select groups first.');
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+                continue;
+            }
+            let sent = 0, failed = 0;
+            for (const group of groupList) {
+                try {
+                    await sock.sendMessage(group.jid, { text: msg });
+                    console.log(`✅ Sent to ${group.name}`);
+                    sent++;
+                } catch (e) {
+                    console.log(`❌ Failed to send to ${group.name}: ${e.message}`);
+                    failed++;
                 }
-
-                // Call your greeting sending function here
-                await sendGreeting(target, type); // Replace with your real function
-
-                console.log('\n✅ Greeting sent!');
-                showMenu(); // Go back to greeting menu
-            });
-        });
+            }
+            console.log(`Done. Sent: ${sent}, Failed: ${failed}`);
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+        } else if (option === 'massContacts') {
+            clearScreen();
+            const { sub } = await prompt([
+                {
+                    type: 'rawlist',
+                    name: 'sub',
+                    message: 'Message Saved Contacts:',
+                    choices: [
+                        { name: '📄  Choose Pre-written Message', value: 'pre' },
+                        { name: '✍️   Type Custom Message', value: 'manual' },
+                        { name: '📂  View Saved Contacts', value: 'view' },
+                        { name: '🧹  Clear Contact List', value: 'clear' },
+                        { name: '⬅️   Back to Main Menu', value: 'back' }
+                    ]
+                }
+            ]);
+            if (sub === 'back') continue;
+            let contacts = [];
+            try {
+                contacts = JSON.parse(fs.readFileSync('./mass-contacts.json', 'utf-8'));
+            } catch (e) {}
+            if (sub === 'view') {
+                if (!contacts.length) {
+                    console.log('No contacts saved.');
+                } else {
+                    contacts.forEach(c => console.log(`- ${c.name}: ${c.number}`));
+                    await pauseIfNeeded(contacts.length);
+                }
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+                continue;
+            } else if (sub === 'clear') {
+                clearSavedContacts();
+                contacts = [];
+                console.log('✅ Contact list cleared.');
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+                continue;
+            }
+            let msg = '';
+            if (sub === 'pre') {
+                msg = await pickMessage(true);
+            } else if (sub === 'manual') {
+                const { m } = await prompt([{ type: 'input', name: 'm', message: 'Enter your message:' }]);
+                msg = m;
+            }
+            if (!contacts.length) {
+                console.log('❌ No contacts saved. Please add contacts first.');
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+                continue;
+            }
+            let sent = 0, failed = 0;
+            for (const contact of contacts) {
+                try {
+                    await sock.sendMessage(`${contact.number}@s.whatsapp.net`, { text: msg });
+                    console.log(`✅ Sent to ${contact.name}`);
+                    sent++;
+                } catch (e) {
+                    console.log(`❌ Failed to send to ${contact.name}: ${e.message}`);
+                    failed++;
+                }
+            }
+            console.log(`Done. Sent: ${sent}, Failed: ${failed}`);
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+        } else if (option === 'viewSaved') {
+            clearScreen();
+            const { sub } = await prompt([
+                {
+                    type: 'rawlist',
+                    name: 'sub',
+                    message: 'View Saved Groups / Contacts:',
+                    choices: [
+                        { name: '📂  View Saved Groups', value: 'groups' },
+                        { name: '📇  View Saved Contacts', value: 'contacts' },
+                        { name: '⬅️   Back to Main Menu', value: 'back' }
+                    ]
+                }
+            ]);
+            if (sub === 'back') continue;
+            if (sub === 'groups') {
+                try {
+                    const groupList = JSON.parse(fs.readFileSync('./mass-groups.json', 'utf-8'));
+                    if (!groupList.length) {
+                        console.log('❌ No groups saved.');
+                    } else {
+                        groupList.forEach(g => console.log(`- ${g.name}`));
+                        await pauseIfNeeded(groupList.length);
+                    }
+                } catch (e) {
+                    console.log('❌ No groups saved.');
+                }
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+            } else if (sub === 'contacts') {
+                let contacts = [];
+                try {
+                    contacts = JSON.parse(fs.readFileSync('./mass-contacts.json', 'utf-8'));
+                } catch (e) {}
+                if (!contacts.length) {
+                    console.log('No contacts saved.');
+                } else {
+                    contacts.forEach(c => console.log(`- ${c.name}: ${c.number}`));
+                    await pauseIfNeeded(contacts.length);
+                }
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+            }
+        } else if (option === 'prewritten') {
+            clearScreen();
+            await prewrittenMessagesMenu();
+        } else if (option === 'manageGroups') {
+            clearScreen();
+            const { sub } = await prompt([
+                {
+                    type: 'rawlist',
+                    name: 'sub',
+                    message: 'Manage Groups:',
+                    choices: [
+                        { name: '✅  Select Groups for Messaging', value: 'select' },
+                        { name: '📂  View Current Selection', value: 'view' },
+                        { name: '🧹  Clear Group Selection', value: 'clear' },
+                        { name: '⬅️   Back to Main Menu', value: 'back' }
+                    ]
+                }
+            ]);
+            if (sub === 'back') continue;
+            if (sub === 'select') {
+                await selectAndSaveMassGroups(sock);
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+            } else if (sub === 'view') {
+                try {
+                    const groupList = JSON.parse(fs.readFileSync('./mass-groups.json', 'utf-8'));
+                    if (!groupList.length) {
+                        console.log('❌ No groups saved.');
+                    } else {
+                        groupList.forEach(g => console.log(`- ${g.name}`));
+                        await pauseIfNeeded(groupList.length);
+                    }
+                } catch (e) {
+                    console.log('❌ No groups saved.');
+                }
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+            } else if (sub === 'clear') {
+                clearSavedGroups();
+                console.log('✅ Group selection cleared.');
+                await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
+            }
+        } else if (option === 'manageContacts') {
+            clearScreen();
+            await manageContacts();
+        }
     }
-    showMenu();
 }
 
 // Main function to start the WhatsApp bot
@@ -1803,8 +2133,8 @@ async function startWhatsAppBot() {
             console.log('\n========================================');
             console.log('         CONNECTION ESTABLISHED         ');
             console.log('========================================');
-            // Immediately show the greeting menu
-            startGreetingMenu(sock);
+            // Immediately show the new main menu
+            await mainMenu(sock);
         }
 
         if (connection === 'close') {
@@ -1816,11 +2146,19 @@ async function startWhatsAppBot() {
             console.log('Reason:', lastDisconnect?.error?.message);
             if (isConflict) {
                 console.log('\n⚠️ CONFLICT DETECTED: Another instance is running or WhatsApp is logged in elsewhere');
-                console.log('Please follow these steps:');
-                console.log('1. Close all other instances of the bot');
-                console.log('2. Log out of WhatsApp Web on other devices');
-                console.log('3. Clear auth files: rm -rf auth_info_baileys/*');
-                console.log('4. Restart the bot: node bot.js\n');
+                console.log('The bot will now force logout and exit to prevent reconnect loops.');
+                console.log('Please follow these steps before restarting:');
+                console.log('1. Close ALL other instances of this bot (on all computers/terminals).');
+                console.log('2. Log out of WhatsApp Web on ALL browsers and devices:');
+                console.log('   - On your phone: WhatsApp > Linked Devices > Log out of all devices.');
+                console.log('3. After that, restart this bot and scan the new QR code.');
+                // Force delete auth folder
+                const authDir = path.join(__dirname, 'auth_info_baileys');
+                if (deleteFolderRecursive(authDir)) {
+                    console.log('✅ Auth info deleted. You must scan a new QR code next time.');
+                } else {
+                    console.log('Auth info folder not found. Already logged out or never logged in.');
+                }
                 process.exit(1);
             }
             const shouldReconnect = (lastDisconnect?.error instanceof Boom)
@@ -1873,7 +2211,7 @@ async function handleLeadResponse(sock, message) {
         console.log('\n========================================');
         console.log('📱 Message from Sister\'s Number:');
         console.log('========================================');
-        console.log(`💬 Content: ${messageContent}`);
+        console.log(`�� Content: ${messageContent}`);
         console.log('========================================\n');
 
         // Basic lead pattern check
@@ -1888,6 +2226,188 @@ async function handleLeadResponse(sock, message) {
             console.log('Lead detected in message:', messageContent);
         } else {
             console.log('Message is not a lead, skipping');
+        }
+    }
+}
+
+// Helper to pick a pre-written or custom message
+async function pickMessage(prewrittenOnly = false) {
+    if (!prewrittenOnly) {
+        const { msgType } = await prompt([
+            {
+                type: 'rawlist',
+                name: 'msgType',
+                message: 'Choose message type:',
+                choices: [
+                    { name: 'Choose a pre-written message', value: 'pre' },
+                    { name: 'Write a custom message', value: 'custom' }
+                ]
+            }
+        ]);
+        if (msgType === 'custom') {
+            const { msg } = await prompt([
+                { type: 'input', name: 'msg', message: 'Enter your message:' }
+            ]);
+            return msg;
+        }
+    }
+    const { msgIdx } = await prompt([
+        {
+            type: 'rawlist',
+            name: 'msgIdx',
+            message: 'Select a pre-written message:',
+            choices: prewrittenMessages.map((m, i) => ({ name: m.title, value: i }))
+        }
+    ]);
+    let msg = prewrittenMessages[msgIdx].text;
+    if (Array.isArray(msg)) {
+        const { shortIdx } = await prompt([
+            {
+                type: 'rawlist',
+                name: 'shortIdx',
+                message: 'Select an ultra-short lead request:',
+                choices: msg.map((m, i) => ({ name: m, value: i }))
+            }
+        ]);
+        msg = msg[shortIdx];
+    }
+    return msg;
+}
+
+// Motivational Broadcasts
+const motivationalBroadcasts = [
+    {
+        tagline: '🏁 1. Morning Kick-off Greeting',
+        text: "🌞 Good morning team!\nLet's aim for strong Bajaj lead conversions today 💪\nKeep sharing eligible leads — every one counts. Let's make it a productive day! 🔁"
+    },
+    {
+        tagline: '🎯 2. Mid-day Motivation Push',
+        text: "Hi everyone,\nQuick reminder to keep the Bajaj EMI options in your patient/customer conversations.\nEven one extra lead from your side makes a big impact — let's cross the target today! 🚀"
+    },
+    {
+        tagline: '🔁 3. End of Day Wrap with Push',
+        text: "Team, thank you for your efforts today 🙌\nIf you've spoken to any potential Bajaj EMI customers, don't forget to send the leads before end of day.\nLet's hit our daily numbers together! ✅"
+    },
+    {
+        tagline: '📢 4. Offer-Focused Group Broadcast',
+        text: "🚨 Reminder: Bajaj EMI is available for 0 down payment, minimal docs & quick approval.\nPlease share this info with your walk-ins and customers — and share eligible leads in the group.\nLet's not miss out on strong conversions this week 💼"
+    },
+    {
+        tagline: '📆 1. Urgent Month-End Reminder',
+        text: "📢 Team, we're in the final stretch of the month!\nLet's push all pending Bajaj EMI leads today and tomorrow.\nEvery single lead counts toward our monthly target — let's finish strong 💪🔥"
+    }
+];
+
+// Personal motivational messages for individuals
+const personalMotivationalMessages = [
+    {
+        tagline: '🙋‍♂️ 1. Gentle Reminder (Friendly)',
+        text: "Hi [Name], just a quick reminder to share any eligible Bajaj leads if you've come across customers today.\nEven one or two can help us push closer to our target. Appreciate your support! 👍"
+    },
+    {
+        tagline: '📈 2. End-of-Day Follow-Up',
+        text: "Hey [Name], if you've had any Bajaj EMI conversations today, please do share the lead details before the day ends.\nWe're trying to close things on time. Let me know if you need help. ✅"
+    },
+    {
+        tagline: '🎯 3. Performance Nudge (Motivational)',
+        text: "Hi [Name], we're counting on a strong finish this week — and I know you've always contributed well!\nIf you've spoken to any eligible customers, please forward the Bajaj leads when you can. Let's keep the momentum! 💪"
+    }
+];
+
+const PREWRITTEN_MESSAGES_FILE = './prewritten-messages.json';
+
+// Default pre-written messages
+const defaultPrewrittenMessages = [
+    { key: 'morning', title: '🌅 Morning Message', group: 'Daily Greetings', text: 'Good morning. Start checking for Bajaj EMI leads and share eligible ones during the day.' },
+    { key: 'afternoon', title: '🌞 Afternoon Message', group: 'Daily Greetings', text: 'Midday check-in. Continue pushing Bajaj EMI where applicable and update leads list.' },
+    { key: 'evening', title: '🌙 Evening Message', group: 'Daily Greetings', text: 'End-of-day reminder. Share any pending Bajaj EMI leads before closing.' },
+    { key: 'monthend', title: '📈 Month-End Push', group: 'Special Timings', text: 'We\'re in the final stretch of the month. Push all eligible Bajaj EMI leads today to close strong.' },
+    { key: 'followup', title: '🔁 Daily Follow-up Reminder', group: 'Special Timings', text: 'Reminder to ask every customer about Bajaj EMI today. Don\'t miss potential leads.' },
+    { key: 'eod', title: '🕒 End-of-Day Lead Push', group: 'Special Timings', text: 'Final update call — if you have any leads from today, share them now before we wrap.' }
+];
+
+function loadPrewrittenMessages() {
+    if (fs.existsSync(PREWRITTEN_MESSAGES_FILE)) {
+        try {
+            const arr = JSON.parse(fs.readFileSync(PREWRITTEN_MESSAGES_FILE, 'utf-8'));
+            if (Array.isArray(arr)) return arr;
+        } catch (e) {}
+    }
+    return [...defaultPrewrittenMessages];
+}
+
+function savePrewrittenMessages(arr) {
+    fs.writeFileSync(PREWRITTEN_MESSAGES_FILE, JSON.stringify(arr, null, 2));
+}
+
+// Remove any previous declaration of prewrittenMessages above this point
+let prewrittenMessages = loadPrewrittenMessages();
+
+// Pre-written Messages menu
+async function prewrittenMessagesMenu() {
+    while (true) {
+        prewrittenMessages = loadPrewrittenMessages();
+        // Group messages for display
+        const daily = prewrittenMessages.filter(m => m.group === 'Daily Greetings');
+        const special = prewrittenMessages.filter(m => m.group === 'Special Timings');
+        const custom = prewrittenMessages.filter(m => !m.group);
+        const choices = [
+            new inquirer.Separator('📅 Daily Greetings:'),
+            ...daily.map((m, i) => ({ name: `${i + 1}. ${m.title}`, value: m.key })),
+            new inquirer.Separator('\n📆 Special Timings:'),
+            ...special.map((m, i) => ({ name: `${i + 4}. ${m.title}`, value: m.key })),
+        ];
+        if (custom.length) {
+            choices.push(new inquirer.Separator('\n📝 Custom Templates:'));
+            choices.push(...custom.map((m, i) => ({ name: `${i + 7}. ${m.title}`, value: m.key })));
+        }
+        choices.push(new inquirer.Separator('\n🛠 Manage Templates:'));
+        choices.push({ name: '➕ Add New Message', value: 'add' });
+        choices.push({ name: '🗑️  Delete a Message', value: 'delete' });
+        choices.push({ name: '⬅️  Back to Main Menu', value: 'back' });
+        const { action } = await prompt([
+            {
+                type: 'rawlist',
+                name: 'action',
+                message: '════════════ PRE-WRITTEN MESSAGES ═══════════',
+                choices
+            }
+        ]);
+        if (action === 'back') return;
+        if (action === 'add') {
+            const { title, text } = await prompt([
+                { type: 'input', name: 'title', message: 'Enter a title for the new message:' },
+                { type: 'input', name: 'text', message: 'Enter the message content:' }
+            ]);
+            const key = `custom_${Date.now()}`;
+            prewrittenMessages.push({ key, title, text });
+            savePrewrittenMessages(prewrittenMessages);
+            console.log('✅ Message added.');
+            continue;
+        }
+        if (action === 'delete') {
+            if (!prewrittenMessages.length) {
+                console.log('No messages to delete.');
+                continue;
+            }
+            const { toDelete } = await prompt([
+                {
+                    type: 'checkbox',
+                    name: 'toDelete',
+                    message: 'Select messages to delete:',
+                    choices: prewrittenMessages.map(m => ({ name: m.title, value: m.key }))
+                }
+            ]);
+            prewrittenMessages = prewrittenMessages.filter(m => !toDelete.includes(m.key));
+            savePrewrittenMessages(prewrittenMessages);
+            console.log('✅ Selected messages deleted.');
+            continue;
+        }
+        // Show message content
+        const msg = prewrittenMessages.find(m => m.key === action);
+        if (msg) {
+            console.log(`\n📋 Message Content:\n${msg.text}\n`);
+            await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
         }
     }
 }
