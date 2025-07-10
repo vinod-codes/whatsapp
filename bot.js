@@ -1724,9 +1724,9 @@ async function manageContacts() {
             } else if (addType === 'multiple') {
                 const { bulk } = await prompt([
                     { 
-                        type: 'editor', 
+                        type: 'input', 
                         name: 'bulk', 
-                        message: 'Paste numbers (comma, space, or newline separated, without country code):\nExample:\n9876543210, 9876543211\n9876543212\n9876543213'
+                        message: 'Paste numbers (comma, space, or newline separated, without country code):\nExample:\n9876543210, 9876543211 9876543212 9876543213'
                     }
                 ]);
                 // Split by comma, space, or newline
