@@ -1691,13 +1691,7 @@ async function manageContacts() {
             if (addType === 'back') continue;
             
             if (addType === 'single') {
-                const { name, number } = await prompt([
-                    { 
-                        type: 'input', 
-                        name: 'name', 
-                        message: 'Enter contact name:',
-                        validate: (input) => input.trim() ? true : 'Name is required'
-                    },
+                const { number } = await prompt([
                     { 
                         type: 'input', 
                         name: 'number', 
@@ -1718,23 +1712,10 @@ async function manageContacts() {
                 // Check if contact already exists
                 const existingContact = contacts.find(c => c.number === fullNumber);
                 if (existingContact) {
-                    console.log(`⚠️ Contact with number ${fullNumber} already exists (${existingContact.name})`);
-                    const { overwrite } = await prompt([
-                        {
-                            type: 'confirm',
-                            name: 'overwrite',
-                            message: 'Do you want to update the existing contact?',
-                            default: false
-                        }
-                    ]);
-                    if (overwrite) {
-                        const index = contacts.findIndex(c => c.number === fullNumber);
-                        contacts[index] = { name: name.trim(), number: fullNumber };
-                        console.log('✅ Contact updated successfully.');
-                    }
+                    console.log(`⚠️ Contact with number ${fullNumber} already exists.`);
                 } else {
-                    contacts.push({ name: name.trim(), number: fullNumber });
-                    console.log(`✅ Contact added: ${name.trim()} (${fullNumber})`);
+                    contacts.push({ number: fullNumber });
+                    console.log(`✅ Contact added: ${fullNumber}`);
                 }
                 
                 fs.writeFileSync('./mass-contacts.json', JSON.stringify(contacts, null, 2));
@@ -1745,44 +1726,24 @@ async function manageContacts() {
                     { 
                         type: 'editor', 
                         name: 'bulk', 
-                        message: 'Enter contacts (one per line, format: Name,Number without country code):\nExample:\nJohn Doe,9876543210\nJane Smith,9876543211'
+                        message: 'Paste numbers (comma, space, or newline separated, without country code):\nExample:\n9876543210, 9876543211\n9876543212\n9876543213'
                     }
                 ]);
-                
-                const lines = bulk.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                // Split by comma, space, or newline
+                const numbers = bulk.split(/\s|,|\n/).map(n => n.replace(/\D/g, '')).filter(n => n.length === 10);
                 let added = 0;
                 let skipped = 0;
-                
-                for (const line of lines) {
-                    const parts = line.split(',');
-                    if (parts.length === 2) {
-                        const name = parts[0].trim();
-                        const number = parts[1].replace(/\D/g, '');
-                        
-                        if (name && number.length === 10) {
-                            const fullNumber = `91${number}`;
-                            
-                            // Check if contact already exists
-                            const existingContact = contacts.find(c => c.number === fullNumber);
-                            if (existingContact) {
-                                console.log(`⚠️ Skipped: ${name} (${fullNumber}) - already exists as ${existingContact.name}`);
-                                skipped++;
-                            } else {
-                                contacts.push({ name, number: fullNumber });
-                                added++;
-                            }
-                        } else {
-                            console.log(`⚠️ Skipped invalid line: ${line}`);
-                            skipped++;
-                        }
-                    } else {
-                        console.log(`⚠️ Skipped invalid format: ${line}`);
+                for (const number of numbers) {
+                    const fullNumber = `91${number}`;
+                    if (contacts.find(c => c.number === fullNumber)) {
                         skipped++;
+                    } else {
+                        contacts.push({ number: fullNumber });
+                        added++;
                     }
                 }
-                
                 fs.writeFileSync('./mass-contacts.json', JSON.stringify(contacts, null, 2));
-                console.log(`✅ Added ${added} contact(s), skipped ${skipped} contact(s).`);
+                console.log(`✅ Added ${added} contact(s), skipped ${skipped} (already existed or invalid).`);
                 await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return to contacts menu...' }]);
             }
         } else if (action === 'remove') {
@@ -1796,7 +1757,7 @@ async function manageContacts() {
                     type: 'checkbox',
                     name: 'toRemove',
                     message: 'Select contacts to remove:',
-                    choices: contacts.map((c, i) => ({ name: `${c.name} (${c.number})`, value: i }))
+                    choices: contacts.map((c, i) => ({ name: `${c.number} (${c.number})`, value: i }))
                 }
             ]);
             contacts = contacts.filter((_, i) => !toRemove.includes(i));
@@ -1810,7 +1771,7 @@ async function manageContacts() {
                 console.log('\n📇 Saved Contacts:');
                 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
                 contacts.forEach((c, i) => {
-                    console.log(`${i + 1}. ${c.name}`);
+                    console.log(`${i + 1}. ${c.number}`);
                     console.log(`   📱 ${c.number}`);
                     console.log('');
                 });
@@ -1978,7 +1939,7 @@ async function mainMenu(sock) {
                 if (!contacts.length) {
                     console.log('No contacts saved.');
                 } else {
-                    contacts.forEach(c => console.log(`- ${c.name}: ${c.number}`));
+                    contacts.forEach(c => console.log(`- ${c.number}: ${c.number}`));
                     await pauseIfNeeded(contacts.length);
                 }
                 await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
@@ -2006,10 +1967,10 @@ async function mainMenu(sock) {
             for (const contact of contacts) {
                 try {
                     await sock.sendMessage(`${contact.number}@s.whatsapp.net`, { text: msg });
-                    console.log(`✅ Sent to ${contact.name}`);
+                    console.log(`✅ Sent to ${contact.number}`);
                     sent++;
                 } catch (e) {
-                    console.log(`❌ Failed to send to ${contact.name}: ${e.message}`);
+                    console.log(`❌ Failed to send to ${contact.number}: ${e.message}`);
                     failed++;
                 }
             }
@@ -2051,7 +2012,7 @@ async function mainMenu(sock) {
                 if (!contacts.length) {
                     console.log('No contacts saved.');
                 } else {
-                    contacts.forEach(c => console.log(`- ${c.name}: ${c.number}`));
+                    contacts.forEach(c => console.log(`- ${c.number}: ${c.number}`));
                     await pauseIfNeeded(contacts.length);
                 }
                 await prompt([{ type: 'input', name: 'pause', message: 'Press Enter to return...' }]);
